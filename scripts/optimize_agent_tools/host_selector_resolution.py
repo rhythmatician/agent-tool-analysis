@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Iterable, Mapping
+from typing import Callable, Iterable, Mapping
 
 _UNKNOWN_REFERENCE = re.compile(
     r"(?:unknownExtensionReference|unknown extension reference)[^'\"]*['\"]([^'\"]+)['\"]",
@@ -243,4 +243,29 @@ def post_generation_selector_validation(
         diagnostics=final_diagnostics,
         repair_attempted=repair_attempted,
         status=status,
+    )
+
+
+def validate_generated_selectors(
+    resolution: SelectorResolution,
+    generate_diagnostics: Callable[[Mapping[str, str]], Iterable[str]],
+    evidence: Iterable[SelectorEvidence],
+) -> SelectorValidation:
+    """Run generation validation with at most one evidence-backed repair."""
+    evidence_list = tuple(evidence)
+    initial_diagnostics = tuple(generate_diagnostics(resolution.selectors))
+    initial_unknown = unknown_extension_references(initial_diagnostics)
+    if not initial_unknown:
+        return post_generation_selector_validation(
+            resolution, initial_diagnostics, evidence_list, ()
+        )
+    repaired = bounded_selector_repair(
+        resolution, initial_diagnostics, evidence_list
+    )
+    revalidation_diagnostics = tuple(generate_diagnostics(repaired.selectors))
+    return post_generation_selector_validation(
+        resolution,
+        initial_diagnostics,
+        evidence_list,
+        revalidation_diagnostics,
     )

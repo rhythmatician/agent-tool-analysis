@@ -354,10 +354,9 @@ def _partition_tools(
 
 
 def _shared_variants(
-    units: tuple[frozenset[str], ...], shared_seed: frozenset[str], limit: int
+    units: tuple[frozenset[str], ...], shared_seed: frozenset[str]
 ) -> tuple[tuple[frozenset[str], str], ...]:
     """Return interpretable exclusive and duplicated shared-all placements."""
-    del limit
     exclusive = frozenset(shared_seed)
     if not units:
         return ((exclusive, "exclusive"),)
@@ -420,6 +419,7 @@ def _candidate_metrics(
     exposure_model: str,
     placement_strategy: str,
     topology: str,
+    session_weights: Mapping[str, float] | None,
 ) -> PartitionCandidate:
     costs: tuple[float | None, ...] = tuple(
         _sum_known(_cost(stats.get(tool)) for tool in tools) for tools in agent_tools
@@ -430,14 +430,18 @@ def _candidate_metrics(
         for tool in tools
         if tool not in shared_tools
     }
-    activation_counts = [0] * len(agent_tools)
-    cross_sessions = 0
-    handoffs = 0
-    delegation_count = 0
+    weights = session_weights or {}
+    activation_counts = [0.0] * len(agent_tools)
+    cross_sessions = 0.0
+    handoffs = 0.0
+    delegation_count = 0.0
     exposure_states = baseline_exposure_states(sessions, exposure_model)
-    context_before: list[float | None] = []
-    context_after: list[float | None] = []
+    context_before = 0.0
+    context_after = 0.0
+    context_complete = True
+    total_weight = sum(weights.get(session.session_id, 1.0) for session in sessions)
     for session in sessions:
+        weight = weights.get(session.session_id, 1.0)
         called_agents = {
             ownership[tool]
             for tool in session.called_tools
@@ -451,41 +455,45 @@ def _candidate_metrics(
         if not called_agents and len(agent_tools) == 1:
             called_agents = {0}
         for index in called_agents:
-            activation_counts[index] += 1
+            activation_counts[index] += weight
         if len(called_agents) > 1:
-            cross_sessions += 1
+            cross_sessions += weight
         ordered_agents = [
             ownership.get(tool, 0)
             for tool in session.called_tools
             if tool in ownership or tool in shared_tools
         ]
-        handoffs += sum(
+        handoffs += weight * sum(
             left != right for left, right in zip(ordered_agents, ordered_agents[1:])
         )
-        delegation_count += max(len(called_agents) - 1, 0)
+        delegation_count += weight * max(len(called_agents) - 1, 0)
 
         surface = _observed_surface(session, exposure_states[session.session_id])
         if surface is None:
-            context_before.append(None)
-            context_after.append(None)
+            context_complete = False
             continue
         before_costs = [_cost(stats.get(tool)) for tool in surface & retained_tools]
-        context_before.append(_sum_known(before_costs))
+        before = _sum_known(before_costs)
         active_costs = [costs[index] for index in called_agents]
-        context_after.append(_sum_known(active_costs))
+        after = _sum_known(active_costs)
+        if before is None or after is None:
+            context_complete = False
+            continue
+        context_before += weight * before
+        context_after += weight * after
 
-    session_count = len(sessions)
+    session_count = total_weight
     rates = tuple(
         count / session_count if session_count else 0.0 for count in activation_counts
     )
     before_cost = (
-        sum(value for value in context_before if value is not None) / session_count
-        if session_count and all(value is not None for value in context_before)
+        context_before / session_count
+        if session_count and context_complete
         else None
     )
     after = (
-        sum(value for value in context_after if value is not None) / session_count
-        if session_count and all(value is not None for value in context_after)
+        context_after / session_count
+        if session_count and context_complete
         else None
     )
     expected_handoffs = handoffs / session_count if session_count else 0.0
@@ -646,7 +654,7 @@ def search_partitions(
                 sharing_choices = (
                     ((shared_seed, "exclusive"),)
                     if agent_count == 1
-                    else _shared_variants(stage_units, shared_seed, max_partition_candidates)
+                    else _shared_variants(stage_units, shared_seed)
                 )
                 for shared_index, (shared, placement_strategy) in enumerate(
                     sharing_choices, start=1
@@ -678,6 +686,7 @@ def search_partitions(
                         exposure_model,
                         placement_strategy,
                         topology,
+                        session_weights,
                     )
                     all_candidates.append(candidate)
     frontier = _pareto(all_candidates)

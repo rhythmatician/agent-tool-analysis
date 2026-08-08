@@ -458,6 +458,9 @@ class ReplayObservation:
     inter_agent_communication_tokens: int = 0
     turns: int = 0
     wall_clock_seconds: float = 0.0
+    billed_input_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    tool_selection_failures: int = 0
 
 
 @dataclass(frozen=True)
@@ -482,6 +485,9 @@ class ReplayAggregate:
     delegation_count: int
     inter_agent_handoffs: int
     wall_clock_seconds: float
+    billed_input_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    tool_selection_failures: int = 0
 
     @property
     def total_tool_context_tokens(self) -> int:
@@ -492,6 +498,11 @@ class ReplayAggregate:
     def orchestration_tokens(self) -> int:
         """Total explicit delegation and inter-agent communication cost."""
         return self.delegation_tokens + self.inter_agent_communication_tokens
+
+    @property
+    def tool_selection_failure_rate(self) -> float:
+        """Observed tool-selection failures per replayed task."""
+        return self.tool_selection_failures / self.task_count if self.task_count else 0.0
 
 
 @dataclass(frozen=True)
@@ -645,6 +656,19 @@ def _aggregate(
         inter_agent_handoffs=sum(max(len(path) - 1, 0) for path in actual_paths),
         wall_clock_seconds=sum(
             observation.wall_clock_seconds for observation in observations
+        ),
+        billed_input_tokens=(
+            sum(observation.billed_input_tokens or 0 for observation in observations)
+            if all(observation.billed_input_tokens is not None for observation in observations)
+            else None
+        ),
+        cached_input_tokens=(
+            sum(observation.cached_input_tokens or 0 for observation in observations)
+            if all(observation.cached_input_tokens is not None for observation in observations)
+            else None
+        ),
+        tool_selection_failures=sum(
+            observation.tool_selection_failures for observation in observations
         ),
     )
 

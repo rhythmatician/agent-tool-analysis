@@ -92,6 +92,9 @@ def _observation(raw: dict[str, Any]) -> ReplayObservation:
         inter_agent_communication_tokens=raw["inter_agent_communication_tokens"],
         turns=raw["turns"],
         wall_clock_seconds=raw["wall_clock_seconds"],
+        billed_input_tokens=raw.get("billed_input_tokens"),
+        cached_input_tokens=raw.get("cached_input_tokens"),
+        tool_selection_failures=raw.get("tool_selection_failures", 0),
     )
 
 
@@ -145,6 +148,10 @@ def _aggregate_report(result: Any, architecture: Any) -> dict[str, Any]:
         "delegation_count": aggregate.delegation_count,
         "inter_agent_handoffs": aggregate.inter_agent_handoffs,
         "wall_clock_seconds": aggregate.wall_clock_seconds,
+        "billed_input_tokens": aggregate.billed_input_tokens,
+        "cached_input_tokens": aggregate.cached_input_tokens,
+        "tool_selection_failures": aggregate.tool_selection_failures,
+        "tool_selection_failure_rate": aggregate.tool_selection_failure_rate,
     }
 
 

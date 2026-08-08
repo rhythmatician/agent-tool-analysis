@@ -79,6 +79,33 @@ def test_manifest_supports_arbitrary_architectures_and_owns_its_baseline() -> No
     }
 
 
+def test_replay_aggregates_billing_and_tool_selection_measurements() -> None:
+    tasks = [ReplayTask("one"), ReplayTask("two")]
+    architecture = build_architecture_manifest(manifest_raw()).architectures[0]
+    result = replay_recorded_observations(
+        tasks,
+        architecture,
+        [
+            observation("one"),
+            ReplayObservation(
+                task_id="two",
+                task_success=True,
+                observed_replay_capability_covered=True,
+                quality_score=1.0,
+                billed_input_tokens=7,
+                cached_input_tokens=3,
+                tool_selection_failures=1,
+            ),
+        ],
+        historical_tools=HISTORICAL_TOOLS,
+    )
+
+    assert result.aggregate.billed_input_tokens is None
+    assert result.aggregate.cached_input_tokens is None
+    assert result.aggregate.tool_selection_failures == 1
+    assert result.aggregate.tool_selection_failure_rate == pytest.approx(0.5)
+
+
 def test_manifest_wire_contract_preserves_topology_and_provenance() -> None:
     raw = manifest_raw()
     raw["search_provenance"] = {"search_strategy": "bounded"}

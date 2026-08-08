@@ -5,6 +5,7 @@ from optimize_agent_tools.host_selector_resolution import (
     post_generation_selector_validation,
     resolve_host_selectors,
     resolve_telemetry_selectors,
+    validate_generated_selectors,
     unknown_extension_references,
 )
 
@@ -183,3 +184,28 @@ def test_post_generation_validation_accepts_clean_generation_without_repair() ->
     assert result.status == "validated"
     assert result.repair_attempted is False
     assert result.to_report()["isolation_enforced"] is True
+
+
+def test_generated_selector_validation_retries_once_after_exact_repair() -> None:
+    initial = resolve_host_selectors(
+        ["github.create_issue"],
+        [],
+    )
+    calls: list[dict[str, str]] = []
+
+    def generate(selectors: dict[str, str]) -> list[str]:
+        calls.append(dict(selectors))
+        return (
+            ["promptValidator.unknownExtensionReference: 'github.create_issue'"]
+            if not selectors
+            else []
+        )
+
+    result = validate_generated_selectors(
+        initial,
+        generate,
+        [SelectorEvidence("github.create_issue", "github.create_issue", "mcp")],
+    )
+
+    assert result.status == "repaired"
+    assert calls == [{}, {"github.create_issue": "github.create_issue"}]

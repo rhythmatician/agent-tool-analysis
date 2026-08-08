@@ -76,6 +76,19 @@ def _timestamp(value: datetime | None) -> str | None:
     return _utc(value).isoformat() if value else None
 
 
+def session_freshness_weight(
+    session: EvidenceSession, now: datetime, half_life_days: float
+) -> float:
+    """Return one session's current-evidence weight."""
+    if session.observed_at is None:
+        return 1.0
+    age_days = max(
+        (now - _utc(session.observed_at)).total_seconds() / 86400,
+        0.0,
+    )
+    return decay_weight(age_days, half_life_days)
+
+
 def _effective_now(
     sessions: Iterable[EvidenceSession], as_of: datetime | None
 ) -> datetime:
@@ -116,13 +129,7 @@ def analyze_freshness(
         weighted_sessions = 0.0
         weighted_calls = 0.0
         for session in tool_sessions:
-            if session.observed_at is None:
-                weight = 1.0
-            else:
-                weight = decay_weight(
-                    max((now - _utc(session.observed_at)).total_seconds() / 86400, 0.0),
-                    config.half_life_days,
-                )
+            weight = session_freshness_weight(session, now, config.half_life_days)
             weighted_sessions += weight
             weighted_calls += session.calls.count(tool) * weight
         age_days = (
@@ -130,8 +137,9 @@ def analyze_freshness(
         )
         trial = (
             tool in mcp_tools
-            and age_days is not None
-            and age_days <= config.trial_window_days
+            and first is not None
+            and max((now - first).total_seconds() / 86400, 0.0)
+            <= config.trial_window_days
         )
         current = (
             age_days is not None
@@ -192,12 +200,7 @@ def session_weights(
     now = _effective_now(session_list, as_of)
     return {
         session.session_id: (
-            1.0
-            if session.observed_at is None
-            else decay_weight(
-                max((now - _utc(session.observed_at)).total_seconds() / 86400, 0.0),
-                config.half_life_days,
-            )
+            session_freshness_weight(session, now, config.half_life_days)
         )
         for session in session_list
     }

@@ -151,12 +151,16 @@ def _validate_args(args: argparse.Namespace, github_rates: tuple[float, ...]) ->
         raise SystemExit(
             "--offline-replay-input requires --offline-replay-candidate; choose an architecture option explicitly"
         )
-    FreshnessConfig(
+    _freshness_config(args).validate()
+
+
+def _freshness_config(args: argparse.Namespace) -> FreshnessConfig:
+    return FreshnessConfig(
         half_life_days=args.freshness_half_life_days,
         current_window_days=args.freshness_current_window_days,
         trial_window_days=args.freshness_trial_window_days,
         current_weight_threshold=args.freshness_current_weight_threshold,
-    ).validate()
+    )
 
 
 def _nmf_seeds(raw: str) -> tuple[int, ...]:
@@ -205,12 +209,7 @@ def main() -> int:
         nmf_max_factors=args.nmf_max_factors,
         nmf_seeds=nmf_seeds,
         nmf_iterations=args.nmf_iterations,
-        freshness_config=FreshnessConfig(
-            half_life_days=args.freshness_half_life_days,
-            current_window_days=args.freshness_current_window_days,
-            trial_window_days=args.freshness_trial_window_days,
-            current_weight_threshold=args.freshness_current_weight_threshold,
-        ),
+        freshness_config=_freshness_config(args),
     )
     if args.offline_replay_input:
         replay_input_path = Path(args.offline_replay_input)
