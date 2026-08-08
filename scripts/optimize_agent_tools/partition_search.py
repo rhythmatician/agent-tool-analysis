@@ -14,7 +14,7 @@ from optimize_agent_tools.replay_harness import (
 )
 from optimize_agent_tools.telemetry_ingestion import (
     CONTROL_PLANE_TOOLS,
-    Session,
+    EvidenceSession,
 )
 
 PARETO_DIMENSIONS = (
@@ -113,10 +113,12 @@ def _pair_key(left: str, right: str) -> tuple[str, str]:
     return (left, right) if left <= right else (right, left)
 
 
-def _observed_surface(session: Session, exposure: BaselineExposure) -> set[str] | None:
+def _observed_surface(
+    session: EvidenceSession, exposure: BaselineExposure
+) -> set[str] | None:
     if (
-        session.exposure_source == "not_observed"
-        and not session.exposed_tools
+        session.exposure_provenance == "not_observed"
+        and not session.has_direct_exposure
         and not exposure.inferred_baseline_exposure
     ):
         return None
@@ -124,12 +126,12 @@ def _observed_surface(session: Session, exposure: BaselineExposure) -> set[str] 
 
 
 def _build_graph(
-    sessions: list[Session],
+    sessions: list[EvidenceSession],
     tools: frozenset[str],
     excluded_tools: frozenset[str] = frozenset(),
 ) -> _Graph:
     total_sessions = len(sessions)
-    total_calls = sum(len(session.calls) for session in sessions)
+    total_calls = sum(len(session.called_tools) for session in sessions)
     co_sessions: dict[tuple[str, str], int] = {}
     adjacency: dict[tuple[str, str], int] = {}
     for session in sessions:
@@ -138,7 +140,7 @@ def _build_graph(
             for right in session_tools[index + 1 :]:
                 key = _pair_key(left, right)
                 co_sessions[key] = co_sessions.get(key, 0) + 1
-        for left, right in zip(session.calls, session.calls[1:]):
+        for left, right in zip(session.called_tools, session.called_tools[1:]):
             if (
                 left != right
                 and left in tools
@@ -372,7 +374,7 @@ def _candidate_metrics(
     agent_tools: tuple[tuple[str, ...], ...],
     shared_tools: frozenset[str],
     control_tools: frozenset[str],
-    sessions: list[Session],
+    sessions: list[EvidenceSession],
     stats: Mapping[str, Any],
     retained_tools: frozenset[str],
     graph: _Graph,
@@ -397,7 +399,7 @@ def _candidate_metrics(
     for session in sessions:
         called_agents = {
             ownership[tool]
-            for tool in session.calls
+            for tool in session.called_tools
             if tool in ownership and tool not in control_tools
         }
         if not called_agents and len(agent_tools) == 1:
@@ -407,7 +409,7 @@ def _candidate_metrics(
         if len(called_agents) > 1:
             cross_sessions += 1
         ordered_agents = [
-            ownership[tool] for tool in session.calls if tool in ownership
+            ownership[tool] for tool in session.called_tools if tool in ownership
         ]
         handoffs += sum(
             left != right for left, right in zip(ordered_agents, ordered_agents[1:])
@@ -512,7 +514,7 @@ def _candidate_dict(candidate: PartitionCandidate) -> dict[str, Any]:
 
 def search_partitions(
     *,
-    sessions: Iterable[Session],
+    sessions: Iterable[EvidenceSession],
     stats: Mapping[str, Any],
     required_tools: Iterable[str] | None = None,
     global_tools: Iterable[str] = (),
