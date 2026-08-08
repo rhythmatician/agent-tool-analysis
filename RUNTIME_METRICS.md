@@ -53,6 +53,45 @@ or production-quality claims.
 - Recommendation policy remains responsible for the strict baseline gate and
   for preserving a valid “do nothing” result.
 
+## Runtime alternatives
+
+`runtime_alternatives.py` constructs the host-neutral comparison table without
+adding strategy identity to `RuntimeMetrics`. It always includes the current
+runtime as `do_nothing`, followed by `prune_only`, `streamlined_static`,
+`runtime_dynamic_retrieval`, `peer_specialists`, `coordinator_children`, and
+`hybrid`. Each row records support as `true`, `false`, or `unknown`, explains
+the support boundary, lists runtime requirements and assumptions, and carries
+metric evidence status for loading, tokens, occupancy, selection,
+coordination, and outcomes.
+
+This layer evaluates alternatives but does not choose a winner. A missing
+runtime measurement is reported as unavailable, not as zero or evidence that a
+strategy is worse. Comparison deltas are emitted only for numeric values
+available for both the candidate and the selected comparison baseline.
+
+## Recommendation policy
+
+`runtime_recommendation.py` consumes the alternatives table with a conservative
+lexicographic policy. It rejects unsupported alternatives and alternatives that
+lose required capability coverage, requires a material improvement before
+justifying added complexity, and prefers measured or inferred evidence over
+weaker modeled evidence. The default complexity preference is configurable and
+is reported with the thresholds:
+
+1. `do_nothing`
+2. `prune_only`
+3. `streamlined_static`
+4. `runtime_dynamic_retrieval`
+5. `peer_specialists`
+6. `coordinator_children`
+7. `hybrid`
+
+The result separates `preferred_option`, `recommendation_strength`,
+`runner_up_options`, rejection reasons, and policy thresholds. A materially
+useful option supported only by counterfactual or incomplete evidence is
+`provisional`; when no alternative clears the gate, the current runtime is
+returned as the supported conservative baseline.
+
 A comparison may claim a measured token or quality delta only when both sides
 have compatible measured evidence. Estimates and counterfactuals remain
 explicitly labelled in reports.

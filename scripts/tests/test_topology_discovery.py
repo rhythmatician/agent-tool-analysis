@@ -48,3 +48,15 @@ def test_topology_discovery_does_not_hide_directional_imbalance() -> None:
     )
 
     assert report["evidence"]["origin_symmetry"] == 0.5
+
+
+def test_topology_discovery_counts_symmetric_self_transitions_once() -> None:
+    report = discover_topologies(
+        [
+            Session("one", "codex", ["exec", "spawn_agent", "exec"]),
+            Session("two", "codex", ["exec", "spawn_agent", "exec"]),
+        ]
+    )
+
+    assert report["evidence"]["origin_symmetry"] == 1.0
+    assert all(0.0 <= candidate["score"] <= 1.0 for candidate in report["candidates"])

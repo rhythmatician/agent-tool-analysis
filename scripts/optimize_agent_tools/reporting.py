@@ -105,6 +105,59 @@ def render_markdown(report: dict[str, Any]) -> str:
                 "",
             ]
         )
+        alternatives = report.get("runtime_alternatives", [])
+        if alternatives:
+            lines.extend(
+                [
+                    "## Runtime alternatives",
+                    "",
+                    "These alternatives are normalized for comparison only; no winner is selected here.",
+                    "",
+                    "| Alternative | Supported | Loading | Occupancy | Tokens | Selection | Coordination | Outcomes |",
+                    "| --- | --- | --- | --- | --- | --- | --- | --- |",
+                ]
+            )
+            for alternative in alternatives:
+                evidence = alternative.get("metric_evidence_status", {})
+                supported = alternative.get("supported")
+                supported_label = (
+                    "yes" if supported is True else "no" if supported is False else "unknown"
+                )
+                lines.append(
+                    "| "
+                    + " | ".join(
+                        [
+                            f"`{alternative['alternative_id']}`",
+                            supported_label,
+                            str(alternative.get("loading_policy", "unknown")),
+                            str(evidence.get("occupancy", "unavailable")),
+                            str(evidence.get("tokens", "unavailable")),
+                            str(evidence.get("selection", "unavailable")),
+                            str(evidence.get("coordination", "unavailable")),
+                            str(evidence.get("outcomes", "unavailable")),
+                        ]
+                    )
+                    + " |"
+                )
+            lines.append("")
+        runtime_recommendation = report.get("runtime_recommendation")
+        if runtime_recommendation:
+            lines.extend(
+                [
+                    "### Runtime recommendation policy",
+                    "",
+                    f"- Preferred option: `{runtime_recommendation.get('preferred_option') or 'none'}`",
+                    f"- Strength: `{runtime_recommendation.get('recommendation_strength', 'none')}`",
+                    f"- Runner-up options: {', '.join(f'`{item}`' for item in runtime_recommendation.get('runner_up_options', [])) or 'none'}",
+                    "- Why: " + "; ".join(runtime_recommendation.get("why", [])),
+                    "- Thresholds: " + ", ".join(
+                        f"{key}={value}"
+                        for key, value in runtime_recommendation.get("thresholds", {}).items()
+                        if key != "complexity_order"
+                    ),
+                    "",
+                ]
+            )
         options = report.get("architecture_options", [])
         if options:
             lines.extend(
