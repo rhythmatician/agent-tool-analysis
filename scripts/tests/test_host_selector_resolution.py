@@ -6,6 +6,7 @@ from optimize_agent_tools.host_selector_resolution import (
     resolve_host_selectors,
     resolve_telemetry_selectors,
     validate_generated_selectors,
+    validate_host_realization,
     unknown_extension_references,
 )
 
@@ -209,3 +210,60 @@ def test_generated_selector_validation_retries_once_after_exact_repair() -> None
 
     assert result.status == "repaired"
     assert calls == [{}, {"github.create_issue": "github.create_issue"}]
+
+
+def test_generic_host_aliases_do_not_realize_canonical_capabilities() -> None:
+    result = validate_host_realization(
+        ["github.fetch_issue", "github.create_issue"],
+        selectors={
+            "execute": "execute",
+            "read": "read",
+            "edit": "edit",
+            "search": "search",
+            "agent": "agent",
+        },
+    )
+
+    assert result.status == "incomplete"
+    assert result.unresolved_capabilities == (
+        "github.create_issue",
+        "github.fetch_issue",
+    )
+
+
+def test_exact_selectors_realize_required_and_exclude_architecture() -> None:
+    result = validate_host_realization(
+        ["github.fetch_issue"],
+        ["github.delete_issue"],
+        selectors={"github.fetch_issue": "github.fetch_issue"},
+    )
+
+    assert result.is_complete is True
+    assert result.reintroduced_capabilities == ()
+
+
+def test_wildcard_requires_verified_inventory_and_preserves_exclusions() -> None:
+    unverified = validate_host_realization(
+        ["github.fetch_issue"],
+        wildcard=True,
+        available_capabilities=["github.fetch_issue"],
+    )
+    unsafe = validate_host_realization(
+        ["github.fetch_issue"],
+        ["github.delete_issue"],
+        wildcard=True,
+        available_capabilities=["github.fetch_issue", "github.delete_issue"],
+        all_tools_verified=True,
+    )
+    safe = validate_host_realization(
+        ["github.fetch_issue"],
+        ["github.delete_issue"],
+        wildcard=True,
+        available_capabilities=["github.fetch_issue"],
+        all_tools_verified=True,
+    )
+
+    assert unverified.status == "incomplete"
+    assert unsafe.reintroduced_capabilities == ("github.delete_issue",)
+    assert unsafe.status == "incomplete"
+    assert safe.is_complete is True

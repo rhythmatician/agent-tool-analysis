@@ -191,9 +191,17 @@ option. Do not send them to replay first. Enter the generation branch:
   ambiguity. Names must be derived only from the selected membership; do not
   force a broader responsibility than the tools support.
 4. Write the proposed agent names, routing instructions, and host-specific
-  agent definitions for the selected architecture and create them directly
-  when the destinations are new and unambiguous. Report exactly what was
-  created and where.
+  agent definitions for the selected architecture only after validating host
+  realization. Compare the canonical required and excluded capabilities with
+  the host-specific selectors: every required capability needs exact verified
+  coverage, and excluded capabilities must not be reintroduced where the host
+  supports restriction. Generic aliases such as `execute`, `read`, `edit`,
+  `search`, or `agent` do not prove coverage of telemetry capabilities such as
+  `github.fetch_pr`. A wildcard or omitted `tools` setting is acceptable only
+  when the host's available-tool inventory and boundary behavior are verified.
+  If this check is incomplete, do not create the file and do not report
+  “Created”; report materialization as incomplete with the missing or
+  reintroduced capabilities instead.
 5. Ask for confirmation instead of creating files only if an existing file
   would be overwritten, existing agent/MCP/plugin/IDE configuration would be
   modified, the destination is ambiguous, or the host-specific agent format
