@@ -37,6 +37,12 @@ from .exposure_models import (
     provider_scoped_session_diagnostics,
 )
 from .exposure_reporting import build_exposure_matrix, exposure_matrix_summary
+from .freshness import (
+    FreshnessConfig,
+    analyze_freshness,
+    session_weights,
+    trial_workload_opportunities,
+)
 from .nmf_screening import NMFConfig, run_nmf_screening
 from .replay_harness import BASELINE_ARCHITECTURE_ID
 from .telemetry_ingestion import (
@@ -1935,6 +1941,7 @@ def _run_analysis(
     nmf_max_factors: int = 4,
     nmf_seeds: Iterable[int] = (0, 1, 2),
     nmf_iterations: int = 160,
+    freshness_config: FreshnessConfig | None = None,
 ) -> AnalysisWorkflowResult:
     if max_agents < 1:
         raise ValueError("max_agents must be at least 1.")
@@ -1961,6 +1968,9 @@ def _run_analysis(
     )
     call_sessions = [session for session in sessions if session.calls]
     exposure_sessions = [session for session in sessions if session.exposed_tools]
+    freshness_config = freshness_config or FreshnessConfig()
+    freshness = analyze_freshness(call_sessions, config=freshness_config)
+    current_weights = session_weights(call_sessions, config=freshness_config)
     stats = _run_stage(
         "statistics",
         lambda: build_stats(
@@ -2002,7 +2012,9 @@ def _run_analysis(
             max_factors=nmf_max_factors,
             seeds=tuple(nmf_seeds),
             iterations=nmf_iterations,
+            matrix_mode="freshness_weighted_session_usage",
         ),
+        session_weights=current_weights,
     )
     clusters = agglomerative_clusters(active_tools, pairs, similarity_threshold)
     candidates = make_candidate_agents(
@@ -2090,6 +2102,7 @@ def _run_analysis(
             control_tools=decomposition_control_tools,
             search_hints=nmf_screening.search_hints,
             exposure_model="observed_only",
+            session_weights=current_weights,
         ),
     )
     measurement = frontier_measurement_summary(
@@ -2293,6 +2306,7 @@ def _run_analysis(
             "nmf_max_factors": nmf_max_factors,
             "nmf_seeds": list(nmf_seeds),
             "nmf_iterations": nmf_iterations,
+            "freshness": freshness["config"],
         },
         "tools": tools_report,
         "exposure_matrix": build_exposure_matrix(sessions, stats),
@@ -2309,6 +2323,10 @@ def _run_analysis(
             for record in role_records.values()
         ],
         "nmf_screening": nmf_screening.as_dict(),
+        "freshness": freshness,
+        "trial_workload_opportunities": trial_workload_opportunities(
+            call_sessions, freshness
+        ),
         "exposure_models": exposure_model_summary(sessions),
         "github_exposure_sensitivity": github_sensitivity,
         "cluster_one_subset_analysis": subset_analysis,
@@ -2407,6 +2425,7 @@ def analyze(
     nmf_max_factors: int = 4,
     nmf_seeds: Iterable[int] = (0, 1, 2),
     nmf_iterations: int = 160,
+    freshness_config: FreshnessConfig | None = None,
 ) -> dict[str, Any]:
     """Run the analysis workflow and return its stable serialized report."""
 
@@ -2430,5 +2449,6 @@ def analyze(
         nmf_max_factors=nmf_max_factors,
         nmf_seeds=nmf_seeds,
         nmf_iterations=nmf_iterations,
+        freshness_config=freshness_config,
     )
     return result.serialize()

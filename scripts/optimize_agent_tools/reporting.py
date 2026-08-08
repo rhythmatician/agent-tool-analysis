@@ -239,6 +239,22 @@ def render_markdown(report: dict[str, Any]) -> str:
             ]
         )
 
+    freshness = report.get("freshness")
+    if freshness:
+        lines.extend(
+            [
+                "## Freshness and maturity",
+                "",
+                f"- Exponential half-life: {freshness['config']['half_life_days']:.1f} days",
+                f"- Lifetime-required tools (never removed by decay): {format_tools(freshness.get('lifetime_required', []))}",
+                f"- Current tools: {format_tools(freshness.get('current', []))}",
+                f"- Currently low-frequency tools: {format_tools(freshness.get('currently_low_frequency', []))}",
+                f"- Trial MCP tools: {format_tools(freshness.get('trial', []))}",
+                f"- Trial workload opportunities: {len(report.get('trial_workload_opportunities', []))}",
+                "",
+            ]
+        )
+
     discovery = report["definition_discovery"]
     manifest = discovery["runtime_manifest"]
     lines.extend(
