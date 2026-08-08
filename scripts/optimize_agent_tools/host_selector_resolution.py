@@ -1,4 +1,9 @@
-"""Evidence-based translation from telemetry capabilities to host selectors."""
+"""Evidence-based translation from telemetry capabilities to host selectors.
+
+The post-generation validation seam deliberately accepts diagnostics from the
+initial generation and the one permitted revalidation. It does not generate
+files or retry a host more than once.
+"""
 
 from __future__ import annotations
 
@@ -52,6 +57,36 @@ class SelectorResolution:
     @property
     def isolation_enforced(self) -> bool:
         return not self.unresolved and not self.ambiguous
+
+
+@dataclass(frozen=True)
+class SelectorValidation:
+    """Bounded post-generation validation result for generated selectors."""
+
+    resolution: SelectorResolution
+    initial_unknown_references: tuple[str, ...]
+    unknown_references: tuple[str, ...]
+    diagnostics: tuple[str, ...]
+    repair_attempted: bool
+    status: str
+
+    @property
+    def unresolved_capabilities(self) -> tuple[str, ...]:
+        return self.resolution.unresolved
+
+    def to_report(self) -> dict[str, object]:
+        """Return the stable, user-facing validation summary."""
+        return {
+            "status": self.status,
+            "repair_attempted": self.repair_attempted,
+            "isolation_enforced": self.resolution.isolation_enforced
+            and not self.unknown_references,
+            "unresolved_capabilities": list(self.resolution.unresolved),
+            "ambiguous_capabilities": list(self.resolution.ambiguous),
+            "initial_unknown_references": list(self.initial_unknown_references),
+            "unknown_references": list(self.unknown_references),
+            "diagnostics": list(self.diagnostics),
+        }
 
 
 def _is_trusted(item: SelectorEvidence) -> bool:
@@ -166,4 +201,46 @@ def bounded_selector_repair(
     )
     return SelectorResolution(
         selectors, unresolved, resolved_evidence, resolution.ambiguous
+    )
+
+
+def post_generation_selector_validation(
+    resolution: SelectorResolution,
+    generation_diagnostics: Iterable[str],
+    evidence: Iterable[SelectorEvidence],
+    revalidation_diagnostics: Iterable[str],
+) -> SelectorValidation:
+    """Inspect generation diagnostics, repair once, and report revalidation.
+
+    ``revalidation_diagnostics`` must come from the host's single validation
+    after the optional repair. The function performs no implicit retries and
+    retains unresolved capabilities when the host gives no trusted evidence.
+    """
+    initial_diagnostics = tuple(generation_diagnostics)
+    final_diagnostics = tuple(revalidation_diagnostics)
+    initial_unknown = unknown_extension_references(initial_diagnostics)
+    repair_attempted = bool(initial_unknown)
+    final_resolution = (
+        bounded_selector_repair(resolution, initial_diagnostics, evidence)
+        if repair_attempted
+        else resolution
+    )
+    unknown = unknown_extension_references(final_diagnostics)
+    if (
+        unknown
+        or final_resolution.unresolved
+        or final_resolution.ambiguous
+    ):
+        status = "unresolved"
+    elif repair_attempted:
+        status = "repaired"
+    else:
+        status = "validated"
+    return SelectorValidation(
+        resolution=final_resolution,
+        initial_unknown_references=initial_unknown,
+        unknown_references=unknown,
+        diagnostics=final_diagnostics,
+        repair_attempted=repair_attempted,
+        status=status,
     )

@@ -2,6 +2,7 @@ from optimize_agent_tools.host_selector_resolution import (
     CapabilityBinding,
     SelectorEvidence,
     bounded_selector_repair,
+    post_generation_selector_validation,
     resolve_host_selectors,
     resolve_telemetry_selectors,
     unknown_extension_references,
@@ -111,3 +112,74 @@ def test_bounded_repair_cannot_resolve_a_capability_not_reported_as_unresolved()
     )
 
     assert repaired.selectors == {"github.fetch_issue": "github.fetch_issue"}
+
+
+def test_post_generation_validation_reports_a_successful_single_repair() -> None:
+    initial = resolve_host_selectors(
+        ["github.fetch_issue", "github.create_issue"],
+        [
+            SelectorEvidence("github.fetch_issue", "github.fetch_issue", "mcp"),
+        ],
+    )
+
+    result = post_generation_selector_validation(
+        initial,
+        ["promptValidator.unknownExtensionReference: 'github.create_issue'"],
+        [
+            SelectorEvidence("github.fetch_issue", "github.fetch_issue", "mcp"),
+            SelectorEvidence("github.create_issue", "github.create_issue", "mcp"),
+        ],
+        [],
+    )
+
+    assert result.status == "repaired"
+    assert result.repair_attempted is True
+    assert result.resolution.isolation_enforced is True
+    assert result.unresolved_capabilities == ()
+    assert result.unknown_references == ()
+    assert result.to_report() == {
+        "status": "repaired",
+        "repair_attempted": True,
+        "isolation_enforced": True,
+        "unresolved_capabilities": [],
+        "ambiguous_capabilities": [],
+        "initial_unknown_references": ["github.create_issue"],
+        "unknown_references": [],
+        "diagnostics": [],
+    }
+
+
+def test_post_generation_validation_reports_unresolved_selectors_after_revalidation() -> None:
+    initial = resolve_host_selectors(
+        ["github.fetch_issue"],
+        [SelectorEvidence("github.fetch_issue", "github.fetch_issue", "mcp")],
+    )
+    diagnostics = [
+        "promptValidator.unknownExtensionReference: 'github.fetch_issue'"
+    ]
+
+    result = post_generation_selector_validation(
+        initial,
+        diagnostics,
+        [SelectorEvidence("github.fetch_issue", "github.fetch_issue", "mcp")],
+        diagnostics,
+    )
+
+    assert result.status == "unresolved"
+    assert result.repair_attempted is True
+    assert result.resolution.isolation_enforced is True
+    assert result.unknown_references == ("github.fetch_issue",)
+    assert result.to_report()["diagnostics"] == diagnostics
+
+
+def test_post_generation_validation_accepts_clean_generation_without_repair() -> None:
+    initial = resolve_host_selectors(
+        ["github.fetch_issue"],
+        [SelectorEvidence("github.fetch_issue", "github.fetch_issue", "mcp")],
+    )
+
+    result = post_generation_selector_validation(initial, [], [], [])
+
+    assert result.status == "validated"
+    assert result.repair_attempted is False
+    assert result.to_report()["isolation_enforced"] is True
