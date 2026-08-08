@@ -45,6 +45,8 @@ from .freshness import (
 )
 from .nmf_screening import NMFConfig, run_nmf_screening
 from .replay_harness import BASELINE_ARCHITECTURE_ID
+from .runtime_alternatives import build_runtime_alternatives_report
+from .runtime_metrics import RuntimeMetrics
 from .telemetry_ingestion import (
     Session,
     classify_tool_roles,
@@ -1881,6 +1883,7 @@ def _run_analysis(
     nmf_iterations: int = 160,
     freshness_config: FreshnessConfig | None = None,
     exposure_model: str = "observed_only",
+    runtime_metrics_by_alternative: Mapping[str, RuntimeMetrics] | None = None,
 ) -> AnalysisWorkflowResult:
     if max_agents < 1:
         raise ValueError("max_agents must be at least 1.")
@@ -2212,6 +2215,10 @@ def _run_analysis(
             "provisional_architecture_ids": provisional_architecture_ids,
         },
     )
+    runtime_alternatives = build_runtime_alternatives_report(
+        manifest=manifest,
+        metrics_by_alternative=runtime_metrics_by_alternative,
+    )
     option_ids = [option["architecture_id"] for option in architecture_options]
     multiple_options = (
         len(option_ids) > 1 and specialist_classification["status"] != "proven"
@@ -2282,6 +2289,7 @@ def _run_analysis(
         "pruned_flat_baseline": pruned_flat_baseline,
         "architecture_manifest": manifest,
         "architecture_options": architecture_options,
+        "runtime_alternatives": runtime_alternatives,
         "partition_search": partition_result.report,
         "topology_discovery": topology_discovery,
         "specialist_recommendation": {
@@ -2375,6 +2383,7 @@ def analyze(
     nmf_iterations: int = 160,
     freshness_config: FreshnessConfig | None = None,
     exposure_model: str = "observed_only",
+    runtime_metrics_by_alternative: Mapping[str, RuntimeMetrics] | None = None,
 ) -> dict[str, Any]:
     """Run the analysis workflow and return its stable serialized report."""
 
@@ -2400,5 +2409,6 @@ def analyze(
         nmf_iterations=nmf_iterations,
         freshness_config=freshness_config,
         exposure_model=exposure_model,
+        runtime_metrics_by_alternative=runtime_metrics_by_alternative,
     )
     return result.serialize()

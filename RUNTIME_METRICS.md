@@ -53,6 +53,22 @@ or production-quality claims.
 - Recommendation policy remains responsible for the strict baseline gate and
   for preserving a valid “do nothing” result.
 
+## Runtime alternatives
+
+`runtime_alternatives.py` constructs the host-neutral comparison table without
+adding strategy identity to `RuntimeMetrics`. It always includes the current
+runtime as `do_nothing`, followed by `prune_only`, `streamlined_static`,
+`runtime_dynamic_retrieval`, `peer_specialists`, `coordinator_children`, and
+`hybrid`. Each row records support as `true`, `false`, or `unknown`, explains
+the support boundary, lists runtime requirements and assumptions, and carries
+metric evidence status for loading, tokens, occupancy, selection,
+coordination, and outcomes.
+
+This layer evaluates alternatives but does not choose a winner. A missing
+runtime measurement is reported as unavailable, not as zero or evidence that a
+strategy is worse. Comparison deltas are emitted only for numeric values
+available for both the candidate and the selected comparison baseline.
+
 A comparison may claim a measured token or quality delta only when both sides
 have compatible measured evidence. Estimates and counterfactuals remain
 explicitly labelled in reports.

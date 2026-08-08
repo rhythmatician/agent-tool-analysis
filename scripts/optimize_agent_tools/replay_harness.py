@@ -33,7 +33,7 @@ class BenchmarkArchitecture:
     architecture_id: str
     parent_tools: frozenset[str]
     agent_tools: Mapping[str, frozenset[str]] = field(default_factory=dict)
-    topology: str = "coordinator_specialists"
+    topology: str = "coordinator_children"
     placement_strategy: str | None = None
     shared_tools: Mapping[str, frozenset[str]] = field(default_factory=dict)
     control_tools: frozenset[str] = frozenset()
@@ -50,7 +50,7 @@ class BenchmarkArchitecture:
             raise ValueError("Architecture IDs must be non-empty.")
         if any(not agent_id for agent_id in self.agent_tools):
             raise ValueError("Agent IDs must be non-empty.")
-        if self.topology not in {"flat", "peer", "coordinator_specialists"}:
+        if self.topology not in {"flat", "peer", "coordinator_children"}:
             raise ValueError(f"Unsupported architecture topology: {self.topology}")
         if self.placement_strategy not in {None, "exclusive", "shared_all"}:
             raise ValueError(
@@ -126,7 +126,7 @@ class BenchmarkArchitecture:
     def agent_count(self) -> int:
         if self.topology == "flat":
             return 1
-        if self.topology == "coordinator_specialists" and self.parent_tools:
+        if self.topology == "coordinator_children" and self.parent_tools:
             return len(self.agent_tools) + 1
         return len(self.agent_tools)
 
@@ -216,7 +216,9 @@ def build_architecture_manifest(raw: Mapping[str, Any]) -> ArchitectureManifest:
     for raw_architecture in raw_architectures:
         if not isinstance(raw_architecture, dict):
             raise ValueError("Each manifest architecture must be an object.")
-        topology = str(raw_architecture.get("topology", "coordinator_specialists"))
+        topology = str(raw_architecture.get("topology", "coordinator_children"))
+        if topology == "coordinator_specialists":
+            topology = "coordinator_children"
         raw_agents = raw_architecture.get("agents", {})
         if not isinstance(raw_agents, dict):
             raise ValueError("Architecture agents must be an object.")
