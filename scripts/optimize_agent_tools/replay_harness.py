@@ -18,6 +18,15 @@ def _string_set(values: Iterable[str], field_name: str) -> frozenset[str]:
 
 
 @dataclass(frozen=True)
+class CapabilityCoverage:
+    """Classify requested capabilities from one agent's perspective."""
+
+    direct: frozenset[str]
+    reachable: frozenset[str]
+    unavailable: frozenset[str]
+
+
+@dataclass(frozen=True)
 class BenchmarkArchitecture:
     """One flat, peer, or explicitly coordinator-based architecture."""
 
@@ -33,6 +42,7 @@ class BenchmarkArchitecture:
     directional_only: bool = False
     assumptions: tuple[Any, ...] = ()
     provenance: Mapping[str, Any] = field(default_factory=dict)
+    dependencies: Mapping[str, frozenset[str]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.architecture_id:
@@ -69,6 +79,34 @@ class BenchmarkArchitecture:
                 for targets in self.delegation_edges.values()
             ):
                 raise ValueError("Delegation edges must target declared peer agents.")
+        self._validate_dependencies()
+
+    def _validate_dependencies(self) -> None:
+        available = self.available_tools
+        for tool, dependencies in self.dependencies.items():
+            if tool not in available:
+                raise ValueError(f"Dependency root {tool!r} is not an available capability.")
+            for dependency in dependencies:
+                if dependency not in available:
+                    raise ValueError(
+                        f"Dependency {dependency!r} for {tool!r} is unavailable."
+                    )
+
+        for agent_id, tools in self.agent_tools.items():
+            for tool in tools:
+                for dependency in self.dependencies.get(tool, frozenset()):
+                    if dependency not in self.parent_tools and dependency not in tools:
+                        raise ValueError(
+                            f"Dependency {dependency!r} for {tool!r} is not "
+                            "colocated with its owning agent."
+                        )
+        for tool in self.parent_tools:
+            for dependency in self.dependencies.get(tool, frozenset()):
+                if dependency not in self.parent_tools:
+                    raise ValueError(
+                        f"Dependency {dependency!r} for {tool!r} is not "
+                        "colocated with its owning parent."
+                    )
 
     @property
     def available_tools(self) -> frozenset[str]:
@@ -99,6 +137,23 @@ class BenchmarkArchitecture:
         return frozenset(
             tool for owner in reached for tool in self.agent_tools[owner]
         ) | frozenset(self.parent_tools)
+
+    def capability_coverage(
+        self, agent_id: str, capabilities: Iterable[str]
+    ) -> CapabilityCoverage:
+        """Classify capabilities as direct, delegated-reachable, or unavailable."""
+        requested = _string_set(capabilities, "capabilities")
+        direct = (
+            requested & (self.agent_tools.get(agent_id, frozenset()) | self.parent_tools)
+            if agent_id in self.agent_tools
+            else frozenset()
+        )
+        reachable = requested & (self.effective_tools(agent_id) - direct)
+        return CapabilityCoverage(
+            direct=direct,
+            reachable=reachable,
+            unavailable=requested - direct - reachable,
+        )
 
     def requested_activation_path(self, task: ReplayTask) -> tuple[str, ...]:
         """Return the task's explicit route for this architecture, if any."""
@@ -219,6 +274,15 @@ def build_architecture_manifest(raw: Mapping[str, Any]) -> ArchitectureManifest:
                 directional_only=raw_architecture.get("directional_only") is True,
                 assumptions=tuple(raw_architecture.get("assumptions", ())),
                 provenance=dict(raw_architecture.get("provenance", {})),
+                dependencies={
+                    str(tool): _string_set(
+                        dependencies, f"dependencies.{tool}"
+                    )
+                    for tool, dependencies in (
+                        raw_architecture.get("dependencies")
+                        or                         raw.get("dependencies", {})
+                    ).items()
+                },
             )
         )
 
@@ -276,6 +340,10 @@ def serialize_architecture_manifest(manifest: ArchitectureManifest) -> dict[str,
                 for agent_id, tools in architecture.agent_tools.items()
             },
             "control_tools": sorted(architecture.control_tools),
+            "dependencies": {
+                tool: sorted(dependencies)
+                for tool, dependencies in sorted(architecture.dependencies.items())
+            },
         }
         if topology != "peer":
             entry["parent_tools"] = sorted(architecture.parent_tools)

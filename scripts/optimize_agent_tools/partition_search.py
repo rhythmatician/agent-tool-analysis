@@ -641,6 +641,11 @@ def search_partitions(
             "parent_tools": sorted(baseline_surface),
             "agents": {},
             "control_tools": [],
+            "dependencies": {
+                tool: sorted(values)
+                for tool, values in sorted(dependencies.items())
+                if tool in baseline_surface and values <= baseline_surface
+            },
         }
     ]
     architectures.extend(
@@ -650,6 +655,22 @@ def search_partitions(
             "agent_count": candidate.agent_count,
             "shared_tools": list(candidate.shared_tools),
             "control_tools": list(candidate.control_tools),
+            "dependencies": {
+                tool: sorted(values)
+                for tool, values in sorted(dependencies.items())
+                if tool
+                in frozenset(
+                    tool_name
+                    for agent_tools in candidate.agent_tools
+                    for tool_name in agent_tools
+                )
+                and values
+                <= frozenset(
+                    tool_name
+                    for agent_tools in candidate.agent_tools
+                    for tool_name in agent_tools
+                )
+            },
             "delegation": {
                 "enabled": candidate.agent_count > 1 and bool(candidate.control_tools),
                 "topology": " <-> ".join(

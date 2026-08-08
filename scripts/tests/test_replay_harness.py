@@ -154,6 +154,55 @@ def test_peer_effective_tools_include_reachable_delegated_capabilities() -> None
     )
 
 
+def test_capability_coverage_distinguishes_direct_reachable_and_unavailable() -> None:
+    raw = manifest_raw()
+    raw["architectures"][1] = {
+        **raw["architectures"][1],
+        "topology": "peer",
+        "agent_count": 2,
+        "parent_tools": [],
+        "agents": {
+            "review_agent": {"tools": ["review_tool"], "shared_tools": []},
+            "file_agent": {"tools": ["file_tool"], "shared_tools": []},
+        },
+        "shared_tools": {"review_agent": [], "file_agent": []},
+        "delegation": {
+            "edges": {"review_agent": ["file_agent"], "file_agent": []}
+        },
+    }
+    architecture = build_architecture_manifest(raw).architectures[1]
+
+    coverage = architecture.capability_coverage(
+        "review_agent", {"review_tool", "file_tool", "missing_tool"}
+    )
+
+    assert coverage.direct == frozenset({"review_tool"})
+    assert coverage.reachable == frozenset({"file_tool"})
+    assert coverage.unavailable == frozenset({"missing_tool"})
+
+
+def test_manifest_rejects_dependencies_that_are_not_colocated() -> None:
+    raw = manifest_raw()
+    raw["architectures"][1] = {
+        **raw["architectures"][1],
+        "topology": "peer",
+        "agent_count": 2,
+        "parent_tools": [],
+        "agents": {
+            "review_agent": {"tools": ["review_tool"], "shared_tools": []},
+            "file_agent": {"tools": ["file_tool"], "shared_tools": []},
+        },
+        "shared_tools": {"review_agent": [], "file_agent": []},
+        "dependencies": {"review_tool": ["file_tool"]},
+        "delegation": {
+            "edges": {"review_agent": ["file_agent"], "file_agent": []}
+        },
+    }
+
+    with pytest.raises(ValueError, match="colocated"):
+        build_architecture_manifest(raw)
+
+
 def test_agent_count_is_total_actual_agents_for_each_topology() -> None:
     raw = manifest_raw()
     raw["architectures"][0]["agent_count"] = 1

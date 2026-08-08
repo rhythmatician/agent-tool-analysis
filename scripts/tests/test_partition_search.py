@@ -90,6 +90,9 @@ def test_normal_analysis_workflow_includes_generic_specialist_recommendation() -
         "pruned_flat_baseline"
     )
     assert report["partition_search"]["search"]["max_agents"] == 2
+    assert {
+        candidate["topology"] for candidate in report["topology_discovery"]["candidates"]
+    } == {"flat", "peer", "coordinator_children"}
 
 
 def test_analysis_result_serializes_the_stable_report_shape() -> None:
@@ -549,6 +552,10 @@ def test_search_generates_closed_manifest_candidates_and_metrics() -> None:
         "c",
         "dep_a",
     ]
+    assert all(
+        architecture["dependencies"] == {"a": ["dep_a"]}
+        for architecture in result.manifest["architectures"]
+    )
 
     for architecture in result.manifest["architectures"]:
         if architecture["architecture_id"] == "pruned_flat_baseline":
