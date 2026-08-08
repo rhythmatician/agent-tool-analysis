@@ -639,6 +639,9 @@ def search_partitions(
             "parent_tools": sorted(baseline_surface),
             "agents": {},
             "control_tools": [],
+            "dependencies": {
+                tool: sorted(values) for tool, values in sorted(dependencies.items())
+            },
         }
     ]
     architectures.extend(
@@ -648,6 +651,9 @@ def search_partitions(
             "agent_count": candidate.agent_count,
             "shared_tools": list(candidate.shared_tools),
             "control_tools": list(candidate.control_tools),
+            "dependencies": {
+                tool: sorted(values) for tool, values in sorted(dependencies.items())
+            },
             "delegation": {
                 "enabled": candidate.agent_count > 1 and bool(candidate.control_tools),
                 "topology": " <-> ".join(
