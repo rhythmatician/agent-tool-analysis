@@ -77,6 +77,20 @@ def _observation(raw: dict[str, Any]) -> ReplayObservation:
             f"Observation {raw.get('task_id', '<unknown>')!r} activation path "
             "must be a list of non-empty strings."
         )
+
+    def optional_tools(name: str) -> tuple[str, ...] | None:
+        values = raw.get(name)
+        if values is None:
+            return None
+        if not isinstance(values, list) or not all(
+            isinstance(tool, str) and tool for tool in values
+        ):
+            raise ValueError(
+                f"Observation {raw.get('task_id', '<unknown>')!r} {name} "
+                "must be a list of non-empty strings."
+            )
+        return tuple(values)
+
     return ReplayObservation(
         task_id=raw["task_id"],
         task_success=raw["task_success"],
@@ -96,6 +110,10 @@ def _observation(raw: dict[str, Any]) -> ReplayObservation:
         billed_input_tokens=raw.get("billed_input_tokens"),
         cached_input_tokens=raw.get("cached_input_tokens"),
         tool_selection_failures=raw.get("tool_selection_failures", 0),
+        configured_definitions=optional_tools("configured_definitions"),
+        loaded_definitions=optional_tools("loaded_definitions"),
+        deferred_definitions=optional_tools("deferred_definitions"),
+        selected_tools=optional_tools("selected_tools"),
     )
 
 

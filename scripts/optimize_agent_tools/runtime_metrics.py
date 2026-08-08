@@ -222,12 +222,13 @@ def from_replay_observation(observation: Any) -> RuntimeMetrics:
     """Adapt a ``replay_harness.ReplayObservation`` into the shared contract."""
     source = "replay_observation"
     measured_tokens = lambda value, name: measured(value, source=source, method=name, unit="tokens")
+    tool_metric = lambda value, name: measured(value, source=source, method=name, unit="tools") if value is not None else unavailable(source=source, unit="tools", note=f"Replay did not report {name}.")
     return RuntimeMetrics(
         definitions=DefinitionLoading(
-            configured=unavailable(source=source, unit="tools", note="Observation does not include configured definitions."),
-            loaded=unavailable(source=source, unit="tools", note="Observation does not include loaded definitions."),
-            deferred=unavailable(source=source, unit="tools", note="Observation does not include deferred definitions."),
-            selected=unavailable(source=source, unit="tools", note="Observation records calls, not selected definition names."),
+            configured=tool_metric(observation.configured_definitions, "configured definitions"),
+            loaded=tool_metric(observation.loaded_definitions, "loaded definitions"),
+            deferred=tool_metric(observation.deferred_definitions, "deferred definitions"),
+            selected=tool_metric(observation.selected_tools, "selected tools"),
         ),
         tokens=TokenAccounting(
             total_input=measured_tokens(observation.total_input_tokens, "replay_input"),

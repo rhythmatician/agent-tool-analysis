@@ -41,7 +41,10 @@ or production-quality claims.
 - `from_surface_run()` maps `SurfaceRun` and marks host fields that it cannot
   observe as unavailable.
 - `from_replay_observation()` maps `ReplayObservation` and keeps routing and
-  coordination fields separate from tool selection.
+  coordination fields separate from tool selection. Replay executors may
+  provide `configured_definitions`, `loaded_definitions`,
+  `deferred_definitions`, and `selected_tools`; omitted fields stay unavailable
+  and are never inferred from calls.
 - `from_replay_aggregate()` serializes aggregate replay results with the same
   evidence vocabulary.
 - Telemetry and definition registries remain historical/provenance adapters;
