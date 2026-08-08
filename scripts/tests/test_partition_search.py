@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from optimize_agent_tools.analysis_pipeline import (
+    AnalysisStageError,
+    AnalysisWorkflowResult,
+    _run_analysis,
     analyze,
     build_architecture_options,
     classify_specialist_recommendation,
@@ -88,6 +92,33 @@ def test_normal_analysis_workflow_includes_generic_specialist_recommendation() -
     assert report["partition_search"]["search"]["max_agents"] == 2
 
 
+def test_analysis_result_serializes_the_stable_report_shape() -> None:
+    sessions = [
+        Session("one", "codex", ["a"], {"a"}),
+    ]
+    definitions = {"a": _definition("a", 10)}
+
+    result = _run_analysis(
+        sessions,
+        definitions,
+        {},
+        explicit_path=None,
+        definition_roots=[],
+        min_tool_sessions=1,
+        similarity_threshold=0.35,
+        global_usage_threshold=1.0,
+        min_cluster_size=2,
+        min_cluster_sessions=1,
+        delegation_overhead_tokens=0,
+        max_agents=1,
+    )
+
+    report = result.serialize()
+    assert isinstance(result, AnalysisWorkflowResult)
+    assert report == result.report
+    assert report is not result.report
+
+
 def test_normal_analysis_excludes_runtime_controls_from_decomposition() -> None:
     sessions = [
         Session("one", "codex", ["domain.alpha", "exec", "send_message"]),
@@ -128,6 +159,29 @@ def test_normal_analysis_excludes_runtime_controls_from_decomposition() -> None:
     assert {
         item["tool"] for item in report["nmf_screening"]["control_plane"]["tools"]
     } == {"exec", "send_message", "wait_agent"}
+
+
+def test_analysis_failure_names_the_failing_stage(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*args: object, **kwargs: object) -> dict[str, object]:
+        raise RuntimeError("fixture failure")
+
+    monkeypatch.setattr("optimize_agent_tools.analysis_pipeline.build_stats", fail)
+
+    with pytest.raises(AnalysisStageError, match="statistics stage failed: fixture failure"):
+        analyze(
+            [Session("one", "codex", ["a"], {"a"})],
+            {"a": _definition("a", 10)},
+            {},
+            explicit_path=None,
+            definition_roots=[],
+            min_tool_sessions=1,
+            similarity_threshold=0.35,
+            global_usage_threshold=1.0,
+            min_cluster_size=2,
+            min_cluster_sessions=1,
+            delegation_overhead_tokens=0,
+            max_agents=1,
+        )
 
 
 def test_incomplete_observed_only_frontier_uses_precise_recommendation_language() -> (
