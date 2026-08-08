@@ -36,7 +36,9 @@ def assess_recorded_replay(
         report_manifest = build_architecture_manifest(report["architecture_manifest"])
         report_manifest_wire = serialize_architecture_manifest(report_manifest)
     except (AttributeError, KeyError, TypeError, ValueError) as error:
-        return ReplayReadiness(False, None, (f"analysis architecture manifest is invalid: {error}",))
+        return ReplayReadiness(
+            False, None, (f"analysis architecture manifest is invalid: {error}",)
+        )
     metadata = bundle.get("metadata")
     if not isinstance(metadata, Mapping):
         reasons.append("replay bundle metadata is missing")
@@ -76,9 +78,7 @@ def assess_recorded_replay(
     if candidate_id == BASELINE_ARCHITECTURE_ID:
         reasons.append("the frozen baseline cannot be replayed as the candidate")
     pareto_ids = set(recommendation.get("pareto_candidate_ids", ()))
-    provisional_ids = set(
-        recommendation.get("provisional_architecture_ids", ())
-    )
+    provisional_ids = set(recommendation.get("provisional_architecture_ids", ()))
     if (
         candidate_id is not None
         and candidate_id not in pareto_ids

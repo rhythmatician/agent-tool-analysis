@@ -1,3 +1,8 @@
+from optimize_agent_tools.measurement import (
+    ExperimentIdentity,
+    SurfaceCondition,
+    SurfaceRun,
+)
 from optimize_agent_tools.runtime_alternatives import (
     ALTERNATIVE_IDS,
     build_alternative_plans,
@@ -7,7 +12,6 @@ from optimize_agent_tools.runtime_alternatives import (
 from optimize_agent_tools.runtime_metrics import (
     from_surface_run,
 )
-from optimize_agent_tools.measurement import ExperimentIdentity, SurfaceCondition, SurfaceRun
 
 
 def runtime_metrics() -> object:
@@ -89,7 +93,9 @@ def test_evaluation_keeps_metric_evidence_and_does_not_choose_winner() -> None:
     prune = evaluations[1]
     assert current.metric_evidence_status["loading"] == "measured"
     assert current.metric_evidence_status["occupancy"] == "partial"
-    assert prune.comparison["tokens.total_input"]["baseline_alternative"] == "do_nothing"
+    assert (
+        prune.comparison["tokens.total_input"]["baseline_alternative"] == "do_nothing"
+    )
     assert not any("winner" in key for key in prune.to_record())
 
 
@@ -104,7 +110,9 @@ def test_report_marks_unsupported_and_unmeasured_alternatives_explicitly() -> No
     )
 
     assert len(report) == len(ALTERNATIVE_IDS)
-    dynamic = next(row for row in report if row["alternative_id"] == "runtime_dynamic_retrieval")
+    dynamic = next(
+        row for row in report if row["alternative_id"] == "runtime_dynamic_retrieval"
+    )
     assert dynamic["supported"] is None
     assert dynamic["metric_evidence_status"]["tokens"] == "unavailable"
     assert report[0]["alternative_id"] == "do_nothing"

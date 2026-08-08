@@ -5,9 +5,9 @@ from optimize_agent_tools.host_selector_resolution import (
     post_generation_selector_validation,
     resolve_host_selectors,
     resolve_telemetry_selectors,
+    unknown_extension_references,
     validate_generated_selectors,
     validate_host_realization,
-    unknown_extension_references,
 )
 
 
@@ -51,11 +51,7 @@ def test_unknown_reference_repair_is_exact_and_bounded() -> None:
 
 def test_telemetry_identity_resolves_to_canonical_capability_and_selector() -> None:
     result = resolve_telemetry_selectors(
-        [
-            CapabilityBinding(
-                "github.create_issue", "mcp.github.createIssue"
-            )
-        ],
+        [CapabilityBinding("github.create_issue", "mcp.github.createIssue")],
         [
             SelectorEvidence(
                 "github.create_issue",
@@ -98,7 +94,9 @@ def test_untrusted_or_conflicting_selector_evidence_stays_unresolved() -> None:
     assert result.isolation_enforced is False
 
 
-def test_bounded_repair_cannot_resolve_a_capability_not_reported_as_unresolved() -> None:
+def test_bounded_repair_cannot_resolve_a_capability_not_reported_as_unresolved() -> (
+    None
+):
     initial = resolve_host_selectors(
         ["github.fetch_issue"],
         [SelectorEvidence("github.fetch_issue", "github.fetch_issue", "mcp")],
@@ -151,14 +149,14 @@ def test_post_generation_validation_reports_a_successful_single_repair() -> None
     }
 
 
-def test_post_generation_validation_reports_unresolved_selectors_after_revalidation() -> None:
+def test_post_generation_validation_reports_unresolved_selectors_after_revalidation() -> (
+    None
+):
     initial = resolve_host_selectors(
         ["github.fetch_issue"],
         [SelectorEvidence("github.fetch_issue", "github.fetch_issue", "mcp")],
     )
-    diagnostics = [
-        "promptValidator.unknownExtensionReference: 'github.fetch_issue'"
-    ]
+    diagnostics = ["promptValidator.unknownExtensionReference: 'github.fetch_issue'"]
 
     result = post_generation_selector_validation(
         initial,

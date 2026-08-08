@@ -87,13 +87,14 @@ def test_normal_analysis_workflow_includes_generic_specialist_recommendation() -
     assert report["architecture_options"][0]["label"] == "Pruned single agent"
     assert report["architecture_options"][1]["status"] == "empirical_pareto"
     assert report["runtime_recommendation"]["preferred_option"] == "do_nothing"
-    assert report["runtime_recommendation"]["recommendation_strength"] == "supported"
+    assert report["runtime_recommendation"]["recommendation_strength"] == "provisional"
     assert report["architecture_manifest"]["baseline_architecture_id"] == (
         "pruned_flat_baseline"
     )
     assert report["partition_search"]["search"]["max_agents"] == 2
     assert {
-        candidate["topology"] for candidate in report["topology_discovery"]["candidates"]
+        candidate["topology"]
+        for candidate in report["topology_discovery"]["candidates"]
     } == {"flat", "peer", "coordinator_children"}
 
 
@@ -131,7 +132,13 @@ def test_normal_analysis_excludes_runtime_controls_from_decomposition() -> None:
     ]
     definitions = {
         name: _definition(name, 10)
-        for name in ("domain.alpha", "domain.beta", "exec", "send_message", "wait_agent")
+        for name in (
+            "domain.alpha",
+            "domain.beta",
+            "exec",
+            "send_message",
+            "wait_agent",
+        )
     }
 
     report = analyze(
@@ -166,13 +173,17 @@ def test_normal_analysis_excludes_runtime_controls_from_decomposition() -> None:
     } == {"exec", "send_message", "wait_agent"}
 
 
-def test_analysis_failure_names_the_failing_stage(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_analysis_failure_names_the_failing_stage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     def fail(*args: object, **kwargs: object) -> dict[str, object]:
         raise RuntimeError("fixture failure")
 
     monkeypatch.setattr("optimize_agent_tools.analysis_pipeline.build_stats", fail)
 
-    with pytest.raises(AnalysisStageError, match="statistics stage failed: fixture failure"):
+    with pytest.raises(
+        AnalysisStageError, match="statistics stage failed: fixture failure"
+    ):
         analyze(
             [Session("one", "codex", ["a"], {"a"})],
             {"a": _definition("a", 10)},
@@ -353,7 +364,9 @@ def test_complete_evidence_without_quality_gate_is_still_provisional() -> None:
     assert recommendation["confidence"] == "moderate"
 
 
-def test_directional_hypothesis_without_partition_candidate_does_not_materialize() -> None:
+def test_directional_hypothesis_without_partition_candidate_does_not_materialize() -> (
+    None
+):
     recommendation = {
         "status": "provisional",
         "direction": "2-agent architecture",
@@ -430,9 +443,7 @@ def test_incoherent_partition_candidate_does_not_materialize() -> None:
     )
 
 
-def test_incomplete_provisional_analysis_exposes_only_the_flat_baseline() -> (
-    None
-):
+def test_incomplete_provisional_analysis_exposes_only_the_flat_baseline() -> None:
     sessions = [
         Session(
             "one",
@@ -480,9 +491,7 @@ def test_incomplete_provisional_analysis_exposes_only_the_flat_baseline() -> (
     )
 
     options = report["architecture_options"]
-    assert [option["architecture_id"] for option in options] == [
-        "pruned_flat_baseline"
-    ]
+    assert [option["architecture_id"] for option in options] == ["pruned_flat_baseline"]
     assert report["specialist_recommendation"]["status"] == "none"
     markdown = render_markdown(report)
     assert "Option 1 — Pruned single agent" in markdown
@@ -638,10 +647,10 @@ def test_search_limits_placement_choices_to_exclusive_or_shared_all() -> None:
         "exclusive",
         "shared_all",
     }
-    assert {
-        frozenset(candidate.shared_tools)
-        for candidate in two_agent
-    } == {frozenset({"shared"}), frozenset(retained)}
+    assert {frozenset(candidate.shared_tools) for candidate in two_agent} == {
+        frozenset({"shared"}),
+        frozenset(retained),
+    }
     assert {
         architecture["placement_strategy"]
         for architecture in result.manifest["architectures"]
@@ -813,8 +822,7 @@ def test_nmf_units_are_frozen_for_search_then_split_during_refinement() -> None:
             Session("two", "codex", ["b", "d"], {"b", "d"}),
         ],
         stats={
-            name: SimpleNamespace(definition_tokens=10)
-            for name in ("a", "b", "c", "d")
+            name: SimpleNamespace(definition_tokens=10) for name in ("a", "b", "c", "d")
         },
         required_tools={"a", "b", "c", "d"},
         max_agents=2,

@@ -72,7 +72,9 @@ def discover_topologies(
     symmetric_mass = 0
     seen_pairs: set[tuple[str, str]] = set()
     for left, right in transitions:
-        pair = tuple(sorted((left, right)))
+        pair: tuple[str, str] = (
+            (left, right) if left <= right else (right, left)
+        )
         if pair in seen_pairs:
             continue
         seen_pairs.add(pair)

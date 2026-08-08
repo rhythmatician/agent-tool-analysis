@@ -107,9 +107,7 @@ def build_alternative_plans(
 ) -> tuple[AlternativePlan, ...]:
     """Construct the fixed normalized alternative set without ranking it."""
     topology_ids = _topology_architecture_ids(manifest)
-    baseline_id = str(
-        manifest.get("baseline_architecture_id", "pruned_flat_baseline")
-    )
+    baseline_id = str(manifest.get("baseline_architecture_id", "pruned_flat_baseline"))
     static_ids = [
         architecture_id
         for architecture_id in topology_ids["flat"]
@@ -162,7 +160,9 @@ def build_alternative_plans(
             topology,
             loading_policy,
             True if architecture_ids else False,
-            reason if architecture_ids else f"{reason}; no concrete architecture is available",
+            reason
+            if architecture_ids
+            else f"{reason}; no concrete architecture is available",
             requirements,
             capability_coverage=coverage if architecture_ids else None,
             coverage_reason=coverage_reason,
@@ -272,7 +272,9 @@ def _numeric_metrics(metrics: RuntimeMetrics | None) -> dict[str, float]:
     for group_name, section_name in _METRIC_GROUPS.items():
         section = getattr(metrics, section_name)
         for field_name, metric in vars(section).items():
-            if isinstance(metric.value, (int, float)) and not isinstance(metric.value, bool):
+            if isinstance(metric.value, (int, float)) and not isinstance(
+                metric.value, bool
+            ):
                 values[f"{group_name}.{field_name}"] = float(metric.value)
     return values
 

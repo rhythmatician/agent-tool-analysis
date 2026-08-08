@@ -1625,8 +1625,7 @@ def _is_coherent_provisional_candidate(
     ):
         return False
     if any(
-        set(exclusive[index]) | shared != set(agent_tools[index])
-        for index in range(2)
+        set(exclusive[index]) | shared != set(agent_tools[index]) for index in range(2)
     ):
         return False
     sizes = [len(tools) for tools in exclusive]
@@ -2258,116 +2257,120 @@ def _run_analysis(
             "No cost-complete empirical Pareto candidates or directional "
             "specialist recommendation is supported by the available evidence."
         )
-    return AnalysisWorkflowResult({
-        "config": {
-            "min_tool_sessions": min_tool_sessions,
-            "similarity_threshold": similarity_threshold,
-            "global_usage_threshold": global_usage_threshold,
-            "min_cluster_size": min_cluster_size,
-            "min_cluster_sessions": min_cluster_sessions,
-            "delegation_overhead_tokens": delegation_overhead_tokens,
-            "github_exposure_rates": list(github_exposure_rates),
-            "nmf_max_factors": nmf_max_factors,
-            "nmf_seeds": list(nmf_seeds),
-            "nmf_iterations": nmf_iterations,
-            "freshness": freshness["config"],
-        },
-        "tools": tools_report,
-        "exposure_matrix": build_exposure_matrix(sessions, stats),
-        "exposure_matrix_summary": exposure_matrix_summary(sessions, stats),
-        "exposure_consistency": exposure_consistency(sessions),
-        "measurement_completeness": measurement,
-        "tool_roles": [
-            {
-                "tool": record.tool,
-                "role": record.role,
-                "evidence": record.evidence,
-                "confidence": record.confidence,
-            }
-            for record in role_records.values()
-        ],
-        "nmf_screening": nmf_screening.as_dict(),
-        "freshness": freshness,
-        "trial_workload_opportunities": trial_workload_opportunities(
-            call_sessions, freshness
-        ),
-        "exposure_models": exposure_model_summary(sessions),
-        "github_exposure_sensitivity": github_sensitivity,
-        "cluster_one_subset_analysis": subset_analysis,
-        "candidate_decision_table": build_candidate_decision_table(subset_analysis),
-        "pruned_flat_baseline": pruned_flat_baseline,
-        "architecture_manifest": manifest,
-        "architecture_options": architecture_options,
-        "runtime_alternatives": runtime_alternatives,
-        "runtime_recommendation": runtime_recommendation,
-        "partition_search": partition_result.report,
-        "topology_discovery": topology_discovery,
-        "specialist_recommendation": {
-            "action": "choose_architecture_option"
-            if multiple_options
-            else "recommend_architecture",
-            "headline": specialist_headline,
-            **specialist_classification,
-            "baseline_architecture_id": BASELINE_ARCHITECTURE_ID,
-            "pareto_candidate_ids": pareto_candidate_ids,
-            "provisional_architecture_ids": provisional_architecture_ids,
-            "architecture_option_ids": option_ids,
-            "decision_mode": "user_choice"
-            if multiple_options
-            else "single_recommendation",
-            "search_complete": partition_result.search_complete,
-            "search_strategy": partition_result.search_strategy,
-            "pareto_scope": partition_result.pareto_scope,
-            "exposure_model": exposure_model,
-            "frontier_kind": measurement["frontier_kind"],
-            "directional_only": measurement["directional_only"],
-            "exposure_evidence_sufficient": measurement["exposure_evidence_sufficient"],
-            "cost_completeness": measurement["cost_completeness"],
-            "assumptions": measurement["assumptions"],
-            "search_provenance": measurement["search_provenance"],
-        },
-        "dynamic_tool_group_inventory": dynamic_tool_group_inventory(sessions),
-        "provider_availability_diagnostics": provider_availability_diagnostics(
-            sessions
-        ),
-        "provider_scoped_session_diagnostics": provider_scoped_session_diagnostics(
-            sessions
-        ),
-        "definition_resolution": definition_resolution_report(stats, registry),
-        "definition_discovery": discovery,
-        "clusters": cluster_reports,
-        "global_candidates": sorted(global_tools),
-        "candidate_agents": candidates,
-        "architecture_variants": variants,
-        "dependency_warnings": warnings,
-        "overhead": expected_known_token_cost(
-            call_sessions,
-            stats,
-            global_tools,
-            [],
-            delegation_overhead_tokens,
-            exposure_sessions=exposure_sessions,
-        ),
-        "strongest_pairs": strongest_pairs[:100],
-        "caveats": [
-            "Historical co-usage is evidence of operational coupling, not proof that tools belong in the same agent.",
-            "This script does not measure task correctness or success directly; quality preservation still requires empirical A/B or replay evaluation.",
-            "Tool-definition token costs are exact only when supplied explicitly with --tool-costs. Telemetry-recovered costs use a chars/4 approximation.",
-            "The known-token calculation excludes unknown tool-definition costs; scenario estimates use a global resolved-definition distribution for unresolved observed tools.",
-            "A zero delegation-overhead setting is a lower-bound estimate, not a claim that delegation is free.",
-            "Direct exposure, inferred baseline exposure, and actual calls are separate evidence dimensions; observed-only is an oracle lower bound and should not judge specialization.",
-            "The all-runtime and provider-scoped results are counterfactual baseline assumptions, not observed exposure claims.",
-            "Provider-scoped exposure requires explicit provider availability telemetry; calls and absent calls do not establish availability.",
-        ],
-        "corpus": {
-            "sessions": len(sessions),
-            **session_population_summary(sessions),
-            "tool_calls": sum(len(session.calls) for session in sessions),
-            "unique_tools": len(stats),
-            "active_tools_for_clustering": len(active_tools),
-            "sources": source_summary(sessions),
-        },
-    })
+    return AnalysisWorkflowResult(
+        {
+            "config": {
+                "min_tool_sessions": min_tool_sessions,
+                "similarity_threshold": similarity_threshold,
+                "global_usage_threshold": global_usage_threshold,
+                "min_cluster_size": min_cluster_size,
+                "min_cluster_sessions": min_cluster_sessions,
+                "delegation_overhead_tokens": delegation_overhead_tokens,
+                "github_exposure_rates": list(github_exposure_rates),
+                "nmf_max_factors": nmf_max_factors,
+                "nmf_seeds": list(nmf_seeds),
+                "nmf_iterations": nmf_iterations,
+                "freshness": freshness["config"],
+            },
+            "tools": tools_report,
+            "exposure_matrix": build_exposure_matrix(sessions, stats),
+            "exposure_matrix_summary": exposure_matrix_summary(sessions, stats),
+            "exposure_consistency": exposure_consistency(sessions),
+            "measurement_completeness": measurement,
+            "tool_roles": [
+                {
+                    "tool": record.tool,
+                    "role": record.role,
+                    "evidence": record.evidence,
+                    "confidence": record.confidence,
+                }
+                for record in role_records.values()
+            ],
+            "nmf_screening": nmf_screening.as_dict(),
+            "freshness": freshness,
+            "trial_workload_opportunities": trial_workload_opportunities(
+                call_sessions, freshness
+            ),
+            "exposure_models": exposure_model_summary(sessions),
+            "github_exposure_sensitivity": github_sensitivity,
+            "cluster_one_subset_analysis": subset_analysis,
+            "candidate_decision_table": build_candidate_decision_table(subset_analysis),
+            "pruned_flat_baseline": pruned_flat_baseline,
+            "architecture_manifest": manifest,
+            "architecture_options": architecture_options,
+            "runtime_alternatives": runtime_alternatives,
+            "runtime_recommendation": runtime_recommendation,
+            "partition_search": partition_result.report,
+            "topology_discovery": topology_discovery,
+            "specialist_recommendation": {
+                "action": "choose_architecture_option"
+                if multiple_options
+                else "recommend_architecture",
+                "headline": specialist_headline,
+                **specialist_classification,
+                "baseline_architecture_id": BASELINE_ARCHITECTURE_ID,
+                "pareto_candidate_ids": pareto_candidate_ids,
+                "provisional_architecture_ids": provisional_architecture_ids,
+                "architecture_option_ids": option_ids,
+                "decision_mode": "user_choice"
+                if multiple_options
+                else "single_recommendation",
+                "search_complete": partition_result.search_complete,
+                "search_strategy": partition_result.search_strategy,
+                "pareto_scope": partition_result.pareto_scope,
+                "exposure_model": exposure_model,
+                "frontier_kind": measurement["frontier_kind"],
+                "directional_only": measurement["directional_only"],
+                "exposure_evidence_sufficient": measurement[
+                    "exposure_evidence_sufficient"
+                ],
+                "cost_completeness": measurement["cost_completeness"],
+                "assumptions": measurement["assumptions"],
+                "search_provenance": measurement["search_provenance"],
+            },
+            "dynamic_tool_group_inventory": dynamic_tool_group_inventory(sessions),
+            "provider_availability_diagnostics": provider_availability_diagnostics(
+                sessions
+            ),
+            "provider_scoped_session_diagnostics": provider_scoped_session_diagnostics(
+                sessions
+            ),
+            "definition_resolution": definition_resolution_report(stats, registry),
+            "definition_discovery": discovery,
+            "clusters": cluster_reports,
+            "global_candidates": sorted(global_tools),
+            "candidate_agents": candidates,
+            "architecture_variants": variants,
+            "dependency_warnings": warnings,
+            "overhead": expected_known_token_cost(
+                call_sessions,
+                stats,
+                global_tools,
+                [],
+                delegation_overhead_tokens,
+                exposure_sessions=exposure_sessions,
+            ),
+            "strongest_pairs": strongest_pairs[:100],
+            "caveats": [
+                "Historical co-usage is evidence of operational coupling, not proof that tools belong in the same agent.",
+                "This script does not measure task correctness or success directly; quality preservation still requires empirical A/B or replay evaluation.",
+                "Tool-definition token costs are exact only when supplied explicitly with --tool-costs. Telemetry-recovered costs use a chars/4 approximation.",
+                "The known-token calculation excludes unknown tool-definition costs; scenario estimates use a global resolved-definition distribution for unresolved observed tools.",
+                "A zero delegation-overhead setting is a lower-bound estimate, not a claim that delegation is free.",
+                "Direct exposure, inferred baseline exposure, and actual calls are separate evidence dimensions; observed-only is an oracle lower bound and should not judge specialization.",
+                "The all-runtime and provider-scoped results are counterfactual baseline assumptions, not observed exposure claims.",
+                "Provider-scoped exposure requires explicit provider availability telemetry; calls and absent calls do not establish availability.",
+            ],
+            "corpus": {
+                "sessions": len(sessions),
+                **session_population_summary(sessions),
+                "tool_calls": sum(len(session.calls) for session in sessions),
+                "unique_tools": len(stats),
+                "active_tools_for_clustering": len(active_tools),
+                "sources": source_summary(sessions),
+            },
+        }
+    )
 
 
 def analyze(

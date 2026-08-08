@@ -54,8 +54,7 @@ class BenchmarkArchitecture:
             raise ValueError(f"Unsupported architecture topology: {self.topology}")
         if self.placement_strategy not in {None, "exclusive", "shared_all"}:
             raise ValueError(
-                "Unsupported placement strategy: "
-                f"{self.placement_strategy}"
+                f"Unsupported placement strategy: {self.placement_strategy}"
             )
         if (
             self.declared_agent_count is not None
@@ -93,7 +92,9 @@ class BenchmarkArchitecture:
         available = self.available_tools
         for tool, dependencies in self.dependencies.items():
             if tool not in available:
-                raise ValueError(f"Dependency root {tool!r} is not an available capability.")
+                raise ValueError(
+                    f"Dependency root {tool!r} is not an available capability."
+                )
             for dependency in dependencies:
                 if dependency not in available:
                     raise ValueError(
@@ -189,7 +190,9 @@ class ArchitectureManifest:
         if self.baseline.agent_tools:
             raise ValueError("The manifest baseline must be flat.")
         if set(self.provisional_architecture_ids) - set(architecture_ids):
-            raise ValueError("Provisional architectures must be present in the manifest.")
+            raise ValueError(
+                "Provisional architectures must be present in the manifest."
+            )
 
     @property
     def architecture_ids(self) -> tuple[str, ...]:
@@ -286,12 +289,10 @@ def build_architecture_manifest(raw: Mapping[str, Any]) -> ArchitectureManifest:
                 assumptions=tuple(raw_architecture.get("assumptions", ())),
                 provenance=dict(raw_architecture.get("provenance", {})),
                 dependencies={
-                    str(tool): _string_set(
-                        dependencies, f"dependencies.{tool}"
-                    )
+                    str(tool): _string_set(dependencies, f"dependencies.{tool}")
                     for tool, dependencies in (
                         raw_architecture.get("dependencies")
-                        or                         raw.get("dependencies", {})
+                        or raw.get("dependencies", {})
                     ).items()
                 },
             )
@@ -330,9 +331,7 @@ def serialize_architecture_manifest(manifest: ArchitectureManifest) -> dict[str,
     """Return the canonical JSON contract shared by replay consumers."""
     architectures: list[dict[str, Any]] = []
     for architecture in manifest.architectures:
-        is_baseline = (
-            architecture.architecture_id == manifest.baseline_architecture_id
-        )
+        is_baseline = architecture.architecture_id == manifest.baseline_architecture_id
         topology = "flat" if is_baseline else architecture.topology
         entry: dict[str, Any] = {
             "architecture_id": architecture.architecture_id,
@@ -410,9 +409,7 @@ def select_architecture_manifest(
     selected_ids = tuple(dict.fromkeys(architecture_ids))
     unknown = set(selected_ids) - set(manifest.architecture_ids)
     if unknown:
-        raise ValueError(
-            "Unknown architecture IDs: " + ", ".join(sorted(unknown))
-        )
+        raise ValueError("Unknown architecture IDs: " + ", ".join(sorted(unknown)))
     if manifest.baseline_architecture_id not in selected_ids:
         raise ValueError("The selected manifest must include the frozen baseline.")
     selected = tuple(
@@ -508,7 +505,9 @@ class ReplayAggregate:
     @property
     def tool_selection_failure_rate(self) -> float:
         """Observed tool-selection failures per replayed task."""
-        return self.tool_selection_failures / self.task_count if self.task_count else 0.0
+        return (
+            self.tool_selection_failures / self.task_count if self.task_count else 0.0
+        )
 
 
 @dataclass(frozen=True)
@@ -665,12 +664,18 @@ def _aggregate(
         ),
         billed_input_tokens=(
             sum(observation.billed_input_tokens or 0 for observation in observations)
-            if all(observation.billed_input_tokens is not None for observation in observations)
+            if all(
+                observation.billed_input_tokens is not None
+                for observation in observations
+            )
             else None
         ),
         cached_input_tokens=(
             sum(observation.cached_input_tokens or 0 for observation in observations)
-            if all(observation.cached_input_tokens is not None for observation in observations)
+            if all(
+                observation.cached_input_tokens is not None
+                for observation in observations
+            )
             else None
         ),
         tool_selection_failures=sum(

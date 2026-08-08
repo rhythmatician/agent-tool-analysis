@@ -97,9 +97,13 @@ def classify_tool_role(name: str) -> ToolRoleRecord:
     if name in _DELEGATION_TOOLS:
         return ToolRoleRecord(name, "delegation", "runtime_native_delegation", "high")
     if name in _COORDINATION_TOOLS:
-        return ToolRoleRecord(name, "coordination", "runtime_native_coordination", "high")
+        return ToolRoleRecord(
+            name, "coordination", "runtime_native_coordination", "high"
+        )
     if name in _RUNTIME_INFRASTRUCTURE_TOOLS:
-        return ToolRoleRecord(name, "runtime_infrastructure", "runtime_native_infrastructure", "high")
+        return ToolRoleRecord(
+            name, "runtime_infrastructure", "runtime_native_infrastructure", "high"
+        )
     return ToolRoleRecord(name, "domain", "conservative_unknown_default", "low")
 
 
@@ -469,7 +473,9 @@ def get_vscode_sessions(
                     "vscode",
                     calls=calls,
                     observed_at=observed_at
-                    or datetime.fromtimestamp(os.path.getmtime(file_path), tz=timezone.utc),
+                    or datetime.fromtimestamp(
+                        os.path.getmtime(file_path), tz=timezone.utc
+                    ),
                 )
             )
     return sessions, definitions
@@ -532,7 +538,9 @@ def get_codex_sessions(
                     if exposed
                     else "not_observed",
                     observed_at=observed_at
-                    or datetime.fromtimestamp(os.path.getmtime(file_path), tz=timezone.utc),
+                    or datetime.fromtimestamp(
+                        os.path.getmtime(file_path), tz=timezone.utc
+                    ),
                 )
             )
     return sessions, definitions

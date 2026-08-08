@@ -91,7 +91,9 @@ def _improvements(
     for key, comparison in (row.get("comparison") or {}).items():
         baseline = comparison.get("baseline_value")
         candidate = comparison.get("candidate_value")
-        if not isinstance(baseline, (int, float)) or not isinstance(candidate, (int, float)):
+        if not isinstance(baseline, (int, float)) or not isinstance(
+            candidate, (int, float)
+        ):
             continue
         if key in _LOWER_IS_BETTER:
             absolute = float(baseline) - float(candidate)
@@ -101,7 +103,10 @@ def _improvements(
             continue
         relative = absolute / abs(float(baseline)) if baseline else 0.0
         material = relative >= thresholds.material_relative_improvement
-        if key.startswith("tokens.") and absolute >= thresholds.material_absolute_token_improvement:
+        if (
+            key.startswith("tokens.")
+            and absolute >= thresholds.material_absolute_token_improvement
+        ):
             material = True
         if material:
             improvements.append(
@@ -137,7 +142,24 @@ def _evidence_summary(
             and baseline_value in thresholds.supported_evidence_statuses
         ):
             supported += 1
-    return supported, score, supported >= thresholds.minimum_supported_evidence_dimensions
+    return (
+        supported,
+        score,
+        supported >= thresholds.minimum_supported_evidence_dimensions,
+    )
+
+
+def _has_runtime_evidence(row: Mapping[str, Any]) -> bool:
+    statuses = row.get("metric_evidence_status") or {}
+    return any(status != "unavailable" for status in statuses.values())
+
+
+def _no_material_reason(
+    row: Mapping[str, Any], thresholds: RecommendationThresholds
+) -> str:
+    if not row.get("comparison"):
+        return "no comparable runtime metric evidence against do_nothing"
+    return "runtime deltas do not meet configured materiality thresholds"
 
 
 def recommend_runtime_alternatives(
@@ -152,6 +174,7 @@ def recommend_runtime_alternatives(
     if baseline is None:
         return {
             "preferred_option": None,
+            "preferred_option_label": "none",
             "recommendation_strength": "none",
             "runner_up_options": [],
             "why": ["the required do_nothing comparison alternative is missing"],
@@ -168,10 +191,12 @@ def recommend_runtime_alternatives(
         if row.get("supported") is False:
             reasons.append("alternative is unsupported")
         if row.get("capability_coverage") is False:
-            reasons.append(row.get("coverage_reason", "required capability coverage is lost"))
+            reasons.append(
+                row.get("coverage_reason", "required capability coverage is lost")
+            )
         improvements = _improvements(row, thresholds)
         if len(improvements) < thresholds.minimum_material_dimensions:
-            reasons.append("no material measured or modeled improvement")
+            reasons.append(_no_material_reason(row, thresholds))
         supported_evidence, evidence_score, evidence_is_supported = _evidence_summary(
             row, baseline, improvements, thresholds
         )
@@ -192,14 +217,25 @@ def recommend_runtime_alternatives(
         )
 
     if not viable:
+        baseline_is_observed = _has_runtime_evidence(baseline)
         return {
             "preferred_option": "do_nothing",
-            "recommendation_strength": "supported",
+            "preferred_option_label": "no architecture change",
+            "recommendation_strength": "supported"
+            if baseline_is_observed
+            else "provisional",
             "runner_up_options": [],
-            "why": [
-                "no supported alternative has a material, evidence-backed advantage",
-                "the current runtime remains the conservative baseline",
-            ],
+            "why": (
+                [
+                    "no supported alternative has a material, evidence-backed advantage",
+                    "the current runtime remains the conservative baseline",
+                ]
+                if baseline_is_observed
+                else [
+                    "no comparable runtime metrics establish a material advantage",
+                    "no architecture change is the conservative fallback, not proof that current exposure is optimal",
+                ]
+            ),
             "rejected_options": rejected,
             "thresholds": thresholds.to_record(),
         }
@@ -231,9 +267,12 @@ def recommend_runtime_alternatives(
     if len(tied) > 1 and best["improvements"] == tied[1]["improvements"]:
         return {
             "preferred_option": None,
+            "preferred_option_label": "none",
             "recommendation_strength": "none",
             "runner_up_options": [item["alternative_id"] for item in tied],
-            "why": ["multiple alternatives remain equivalent under the configured thresholds"],
+            "why": [
+                "multiple alternatives remain equivalent under the configured thresholds"
+            ],
             "rejected_options": rejected,
             "thresholds": thresholds.to_record(),
         }
@@ -254,6 +293,7 @@ def recommend_runtime_alternatives(
         why.append("the advantage depends on incomplete or modeled runtime evidence")
     return {
         "preferred_option": best["alternative_id"],
+        "preferred_option_label": best["alternative_id"].replace("_", " "),
         "recommendation_strength": strength,
         "runner_up_options": [item["alternative_id"] for item in viable[1:]],
         "why": why,

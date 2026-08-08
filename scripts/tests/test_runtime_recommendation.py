@@ -24,7 +24,9 @@ def row(
         "alternative_id": alternative_id,
         "supported": supported,
         "capability_coverage": coverage,
-        "coverage_reason": "missing required capabilities" if coverage is False else "ok",
+        "coverage_reason": "missing required capabilities"
+        if coverage is False
+        else "ok",
         "metric_evidence_status": {
             "tokens": evidence,
             "occupancy": evidence,
@@ -48,6 +50,7 @@ def test_policy_rejects_unsupported_and_capability_losing_alternatives() -> None
 
     assert result["preferred_option"] == "do_nothing"
     assert result["recommendation_strength"] == "supported"
+    assert result["preferred_option_label"] == "no architecture change"
     assert {item["alternative_id"] for item in result["rejected_options"]} == {
         "runtime_dynamic_retrieval",
         "peer_specialists",
@@ -58,7 +61,11 @@ def test_policy_prefers_measured_simpler_option_over_weaker_modeled_gain() -> No
     result = recommend_runtime_alternatives(
         [
             row("do_nothing", tokens=(1000, 1000)),
-            row("runtime_dynamic_retrieval", tokens=(1000, 850), evidence="counterfactual"),
+            row(
+                "runtime_dynamic_retrieval",
+                tokens=(1000, 850),
+                evidence="counterfactual",
+            ),
             row("prune_only", tokens=(1000, 880), evidence="measured"),
         ]
     )
@@ -66,6 +73,22 @@ def test_policy_prefers_measured_simpler_option_over_weaker_modeled_gain() -> No
     assert result["preferred_option"] == "prune_only"
     assert result["recommendation_strength"] == "supported"
     assert result["runner_up_options"] == ["runtime_dynamic_retrieval"]
+
+
+def test_evidence_free_no_change_fallback_is_provisional() -> None:
+    result = recommend_runtime_alternatives(
+        [
+            row("do_nothing", evidence="unavailable"),
+            row("prune_only", evidence="unavailable"),
+        ]
+    )
+
+    assert result["preferred_option_label"] == "no architecture change"
+    assert result["recommendation_strength"] == "provisional"
+    assert "not proof" in result["why"][1]
+    assert result["rejected_options"][0]["reasons"] == [
+        "no comparable runtime metric evidence against do_nothing"
+    ]
 
 
 def test_policy_returns_provisional_for_material_but_weak_evidence() -> None:

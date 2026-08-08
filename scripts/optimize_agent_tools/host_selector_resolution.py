@@ -122,9 +122,7 @@ def validate_host_realization(
                 reasons.append("required capabilities are absent from host inventory")
     else:
         unresolved = tuple(
-            capability
-            for capability in required
-            if not selected.get(capability)
+            capability for capability in required if not selected.get(capability)
         )
         if unresolved:
             reasons.append("required capabilities have no exact host selector")
@@ -227,9 +225,7 @@ def resolve_host_selectors(
     requested = sorted(set(capabilities))
     selectors, resolved_evidence, ambiguous = _select_unique(requested, evidence)
     unresolved = tuple(
-        capability
-        for capability in requested
-        if capability not in selectors
+        capability for capability in requested if capability not in selectors
     )
     return SelectorResolution(selectors, unresolved, resolved_evidence, ambiguous)
 
@@ -277,9 +273,7 @@ def bounded_selector_repair(
     """
     unknown = set(unknown_extension_references(diagnostics))
     evidence_by_selector = {
-        item.selector: item
-        for item in evidence
-        if _is_trusted(item)
+        item.selector: item for item in evidence if _is_trusted(item)
     }
     selectors = dict(resolution.selectors)
     resolved_evidence = dict(resolution.evidence)
@@ -323,11 +317,7 @@ def post_generation_selector_validation(
         else resolution
     )
     unknown = unknown_extension_references(final_diagnostics)
-    if (
-        unknown
-        or final_resolution.unresolved
-        or final_resolution.ambiguous
-    ):
+    if unknown or final_resolution.unresolved or final_resolution.ambiguous:
         status = "unresolved"
     elif repair_attempted:
         status = "repaired"
@@ -356,9 +346,7 @@ def validate_generated_selectors(
         return post_generation_selector_validation(
             resolution, initial_diagnostics, evidence_list, ()
         )
-    repaired = bounded_selector_repair(
-        resolution, initial_diagnostics, evidence_list
-    )
+    repaired = bounded_selector_repair(resolution, initial_diagnostics, evidence_list)
     revalidation_diagnostics = tuple(generate_diagnostics(repaired.selectors))
     return post_generation_selector_validation(
         resolution,
