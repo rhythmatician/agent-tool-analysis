@@ -37,18 +37,19 @@ class BenchmarkArchitecture:
             raise ValueError("Agent IDs must be non-empty.")
         if self.topology not in {"flat", "peer", "coordinator_specialists"}:
             raise ValueError(f"Unsupported architecture topology: {self.topology}")
+        if (
+            self.declared_agent_count is not None
+            and self.declared_agent_count != self.agent_count
+        ):
+            raise ValueError(
+                "agent_count must equal the number of actual agents for the "
+                f"{self.topology} topology."
+            )
         if self.topology == "peer":
             if self.parent_tools:
                 raise ValueError("Peer architectures cannot have parent-owned tools.")
             if not self.agent_tools:
                 raise ValueError("Peer architectures must contain actual agents.")
-            if (
-                self.declared_agent_count is not None
-                and self.declared_agent_count != len(self.agent_tools)
-            ):
-                raise ValueError(
-                    "Peer agent_count must equal the number of actual agents."
-                )
             if set(self.shared_tools) != set(self.agent_tools):
                 raise ValueError("Peer shared_tools must name every actual agent.")
             for agent_id, tools in self.agent_tools.items():
@@ -73,6 +74,10 @@ class BenchmarkArchitecture:
 
     @property
     def agent_count(self) -> int:
+        if self.topology == "flat":
+            return 1
+        if self.topology == "coordinator_specialists" and self.parent_tools:
+            return len(self.agent_tools) + 1
         return len(self.agent_tools)
 
     def effective_tools(self, agent_id: str) -> frozenset[str]:

@@ -101,6 +101,50 @@ def test_peer_effective_tools_include_reachable_delegated_capabilities() -> None
     )
 
 
+def test_agent_count_is_total_actual_agents_for_each_topology() -> None:
+    raw = manifest_raw()
+    raw["architectures"][0]["agent_count"] = 1
+    raw["architectures"][1] = {
+        **raw["architectures"][1],
+        "agent_count": 2,
+        "topology": "peer",
+        "parent_tools": [],
+        "agents": {
+            "review_agent": {"tools": ["review_tool"], "shared_tools": []},
+            "file_agent": {"tools": ["file_tool"], "shared_tools": []},
+        },
+    }
+    manifest = build_architecture_manifest(raw)
+
+    assert manifest.architectures[0].agent_count == 1
+    assert manifest.architectures[1].agent_count == 2
+
+    coordinator = build_architecture_manifest(
+        {
+            **raw,
+            "architectures": [
+                raw["architectures"][0],
+                {
+                    "architecture_id": "coordinator",
+                    "topology": "coordinator_specialists",
+                    "agent_count": 2,
+                    "parent_tools": ["exec"],
+                    "agents": {"specialist": ["review_tool"]},
+                },
+            ],
+        }
+    ).architectures[1]
+    assert coordinator.agent_count == 2
+
+
+def test_agent_count_rejects_hidden_or_extra_actual_agents() -> None:
+    raw = manifest_raw()
+    raw["architectures"][1]["agent_count"] = 2
+
+    with pytest.raises(ValueError, match="agent_count"):
+        build_architecture_manifest(raw)
+
+
 def test_manifest_requires_pruned_flat_baseline_name() -> None:
     raw = manifest_raw()
     raw["baseline_architecture_id"] = "some_other_baseline"
@@ -252,6 +296,10 @@ def test_report_evaluates_every_manifest_architecture_without_hard_coded_ids() -
 
     assert set(report["architectures"]) == {BASELINE_ARCHITECTURE_ID, "two_agents"}
     assert set(report["comparisons"]) == {"two_agents"}
+    assert report["benchmark"]["manifest"]["architectures"]["two_agents"][
+        "agent_count"
+    ] == 3
+    assert report["architectures"]["two_agents"]["agent_count"] == 3
     assert report["architectures"]["two_agents"]["inter_agent_handoffs"] == 1
     assert report["architectures"]["two_agents"]["orchestration_tokens"] == 11
 
