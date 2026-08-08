@@ -60,6 +60,103 @@ class SelectorResolution:
 
 
 @dataclass(frozen=True)
+class HostRealization:
+    """Whether a host configuration realizes a canonical architecture."""
+
+    required_capabilities: tuple[str, ...]
+    excluded_capabilities: tuple[str, ...]
+    selectors: Mapping[str, str]
+    unresolved_capabilities: tuple[str, ...]
+    reintroduced_capabilities: tuple[str, ...]
+    wildcard: bool
+    status: str
+    reasons: tuple[str, ...] = ()
+
+    @property
+    def is_complete(self) -> bool:
+        return self.status == "complete"
+
+    def to_report(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "required_capabilities": list(self.required_capabilities),
+            "excluded_capabilities": list(self.excluded_capabilities),
+            "selectors": dict(self.selectors),
+            "unresolved_capabilities": list(self.unresolved_capabilities),
+            "reintroduced_capabilities": list(self.reintroduced_capabilities),
+            "wildcard": self.wildcard,
+            "reasons": list(self.reasons),
+        }
+
+
+def validate_host_realization(
+    required_capabilities: Iterable[str],
+    excluded_capabilities: Iterable[str] = (),
+    selectors: Mapping[str, str] | None = None,
+    *,
+    wildcard: bool = False,
+    available_capabilities: Iterable[str] | None = None,
+    all_tools_verified: bool = False,
+) -> HostRealization:
+    """Gate host materialization against canonical required/excluded sets.
+
+    Canonical capability names are the comparison key. Generic host aliases
+    therefore cannot satisfy a telemetry capability merely by appearing in
+    ``selectors``. Wildcard configuration is accepted only with an explicit
+    host inventory and verification that the inventory preserves the selected
+    boundary.
+    """
+    required = tuple(sorted(set(required_capabilities)))
+    excluded = tuple(sorted(set(excluded_capabilities) - set(required)))
+    selected = dict(selectors or {})
+    available = set(available_capabilities or ())
+    reasons: list[str] = []
+
+    if wildcard:
+        if not all_tools_verified:
+            unresolved = required
+            reasons.append("wildcard exposure is not verified")
+        else:
+            unresolved = tuple(sorted(set(required) - available))
+            if unresolved:
+                reasons.append("required capabilities are absent from host inventory")
+    else:
+        unresolved = tuple(
+            capability
+            for capability in required
+            if not selected.get(capability)
+        )
+        if unresolved:
+            reasons.append("required capabilities have no exact host selector")
+
+    reintroduced = tuple(
+        capability
+        for capability in excluded
+        if (wildcard and capability in available) or selected.get(capability)
+    )
+    if reintroduced:
+        reasons.append("excluded capabilities would remain exposed")
+    if wildcard and excluded and not all_tools_verified:
+        reasons.append("wildcard cannot prove excluded-capability isolation")
+
+    status = (
+        "complete"
+        if not unresolved and not reintroduced and not reasons
+        else "incomplete"
+    )
+    return HostRealization(
+        required,
+        excluded,
+        selected,
+        unresolved,
+        reintroduced,
+        wildcard,
+        status,
+        tuple(dict.fromkeys(reasons)),
+    )
+
+
+@dataclass(frozen=True)
 class SelectorValidation:
     """Bounded post-generation validation result for generated selectors."""
 
