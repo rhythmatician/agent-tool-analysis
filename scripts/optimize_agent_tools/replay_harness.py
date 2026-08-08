@@ -38,6 +38,10 @@ class BenchmarkArchitecture:
     control_tools: frozenset[str] = frozenset()
     delegation_edges: Mapping[str, frozenset[str]] = field(default_factory=dict)
     declared_agent_count: int | None = None
+    provisional: bool = False
+    directional_only: bool = False
+    assumptions: tuple[Any, ...] = ()
+    provenance: Mapping[str, Any] = field(default_factory=dict)
     dependencies: Mapping[str, frozenset[str]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -163,6 +167,8 @@ class ArchitectureManifest:
     baseline_architecture_id: str
     historical_tool_capability_tools: frozenset[str]
     architectures: tuple[BenchmarkArchitecture, ...]
+    search_provenance: Mapping[str, Any] = field(default_factory=dict)
+    provisional_architecture_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.baseline_architecture_id != BASELINE_ARCHITECTURE_ID:
@@ -178,6 +184,8 @@ class ArchitectureManifest:
             raise ValueError("Historical tool-capability tools must not be empty.")
         if self.baseline.agent_tools:
             raise ValueError("The manifest baseline must be flat.")
+        if set(self.provisional_architecture_ids) - set(architecture_ids):
+            raise ValueError("Provisional architectures must be present in the manifest.")
 
     @property
     def architecture_ids(self) -> tuple[str, ...]:
@@ -262,18 +270,28 @@ def build_architecture_manifest(raw: Mapping[str, Any]) -> ArchitectureManifest:
                     if "agent_count" in raw_architecture
                     else None
                 ),
+                provisional=raw_architecture.get("provisional") is True,
+                directional_only=raw_architecture.get("directional_only") is True,
+                assumptions=tuple(raw_architecture.get("assumptions", ())),
+                provenance=dict(raw_architecture.get("provenance", {})),
                 dependencies={
                     str(tool): _string_set(
                         dependencies, f"dependencies.{tool}"
                     )
                     for tool, dependencies in (
                         raw_architecture.get("dependencies")
-                        or raw.get("dependencies", {})
+                        or                         raw.get("dependencies", {})
                     ).items()
                 },
             )
         )
 
+    raw_provenance = raw.get("search_provenance", {})
+    if not isinstance(raw_provenance, Mapping):
+        raise ValueError("Manifest search_provenance must be an object.")
+    raw_provisional_ids = raw.get("provisional_architecture_ids", ())
+    if not isinstance(raw_provisional_ids, (list, tuple)):
+        raise ValueError("Manifest provisional_architecture_ids must be a list.")
     manifest = ArchitectureManifest(
         baseline_architecture_id=str(raw["baseline_architecture_id"]),
         historical_tool_capability_tools=_string_set(
@@ -281,6 +299,10 @@ def build_architecture_manifest(raw: Mapping[str, Any]) -> ArchitectureManifest:
             "historical_tool_capability_tools",
         ),
         architectures=tuple(architectures),
+        search_provenance=dict(raw_provenance),
+        provisional_architecture_ids=tuple(
+            _string_set(raw_provisional_ids, "provisional_architecture_ids")
+        ),
     )
     missing_baseline_tools = (
         manifest.historical_tool_capability_tools - manifest.baseline.available_tools
@@ -291,6 +313,107 @@ def build_architecture_manifest(raw: Mapping[str, Any]) -> ArchitectureManifest:
             + ", ".join(sorted(missing_baseline_tools))
         )
     return manifest
+
+
+def serialize_architecture_manifest(manifest: ArchitectureManifest) -> dict[str, Any]:
+    """Return the canonical JSON contract shared by replay consumers."""
+    architectures: list[dict[str, Any]] = []
+    for architecture in manifest.architectures:
+        is_baseline = (
+            architecture.architecture_id == manifest.baseline_architecture_id
+        )
+        topology = "flat" if is_baseline else architecture.topology
+        entry: dict[str, Any] = {
+            "architecture_id": architecture.architecture_id,
+            "topology": topology,
+            "agent_count": 1 if is_baseline else architecture.agent_count,
+            "agents": {
+                agent_id: {
+                    "tools": sorted(tools),
+                    "shared_tools": sorted(
+                        architecture.shared_tools.get(agent_id, frozenset())
+                    ),
+                    "exclusive_tools": sorted(
+                        tools - architecture.shared_tools.get(agent_id, frozenset())
+                    ),
+                }
+                for agent_id, tools in architecture.agent_tools.items()
+            },
+            "control_tools": sorted(architecture.control_tools),
+            "dependencies": {
+                tool: sorted(dependencies)
+                for tool, dependencies in sorted(architecture.dependencies.items())
+            },
+        }
+        if topology != "peer":
+            entry["parent_tools"] = sorted(architecture.parent_tools)
+        else:
+            entry["shared_tools"] = sorted(
+                set().union(*architecture.shared_tools.values())
+                if architecture.shared_tools
+                else set()
+            )
+            entry["delegation"] = {
+                "enabled": bool(architecture.delegation_edges),
+                "topology": " <-> ".join(sorted(architecture.agent_tools)),
+                "edges": {
+                    agent_id: sorted(targets)
+                    for agent_id, targets in architecture.delegation_edges.items()
+                },
+            }
+        if architecture.provisional:
+            entry["provisional"] = True
+        if architecture.directional_only:
+            entry["directional_only"] = True
+        if architecture.assumptions:
+            entry["assumptions"] = list(architecture.assumptions)
+        if architecture.provenance:
+            entry["provenance"] = dict(architecture.provenance)
+        architectures.append(entry)
+    result: dict[str, Any] = {
+        "baseline_architecture_id": manifest.baseline_architecture_id,
+        "historical_tool_capability_tools": sorted(
+            manifest.historical_tool_capability_tools
+        ),
+        "architectures": architectures,
+    }
+    if manifest.search_provenance:
+        result["search_provenance"] = dict(manifest.search_provenance)
+    if manifest.provisional_architecture_ids:
+        result["provisional_architecture_ids"] = list(
+            manifest.provisional_architecture_ids
+        )
+    return result
+
+
+def select_architecture_manifest(
+    manifest: ArchitectureManifest, architecture_ids: Iterable[str]
+) -> ArchitectureManifest:
+    """Select architectures while retaining the validated contract metadata."""
+    selected_ids = tuple(dict.fromkeys(architecture_ids))
+    unknown = set(selected_ids) - set(manifest.architecture_ids)
+    if unknown:
+        raise ValueError(
+            "Unknown architecture IDs: " + ", ".join(sorted(unknown))
+        )
+    if manifest.baseline_architecture_id not in selected_ids:
+        raise ValueError("The selected manifest must include the frozen baseline.")
+    selected = tuple(
+        architecture
+        for architecture in manifest.architectures
+        if architecture.architecture_id in selected_ids
+    )
+    return ArchitectureManifest(
+        baseline_architecture_id=manifest.baseline_architecture_id,
+        historical_tool_capability_tools=manifest.historical_tool_capability_tools,
+        architectures=selected,
+        search_provenance=manifest.search_provenance,
+        provisional_architecture_ids=tuple(
+            architecture_id
+            for architecture_id in manifest.provisional_architecture_ids
+            if architecture_id in selected_ids
+        ),
+    )
 
 
 @dataclass(frozen=True)

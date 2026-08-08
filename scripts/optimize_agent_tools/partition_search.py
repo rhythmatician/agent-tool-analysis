@@ -11,6 +11,8 @@ from optimize_agent_tools.exposure_models import (
 )
 from optimize_agent_tools.replay_harness import (
     BASELINE_ARCHITECTURE_ID,
+    build_architecture_manifest,
+    serialize_architecture_manifest,
 )
 from optimize_agent_tools.telemetry_ingestion import (
     CONTROL_PLANE_TOOLS,
@@ -640,7 +642,9 @@ def search_partitions(
             "agents": {},
             "control_tools": [],
             "dependencies": {
-                tool: sorted(values) for tool, values in sorted(dependencies.items())
+                tool: sorted(values)
+                for tool, values in sorted(dependencies.items())
+                if tool in baseline_surface and values <= baseline_surface
             },
         }
     ]
@@ -652,7 +656,20 @@ def search_partitions(
             "shared_tools": list(candidate.shared_tools),
             "control_tools": list(candidate.control_tools),
             "dependencies": {
-                tool: sorted(values) for tool, values in sorted(dependencies.items())
+                tool: sorted(values)
+                for tool, values in sorted(dependencies.items())
+                if tool
+                in frozenset(
+                    tool_name
+                    for agent_tools in candidate.agent_tools
+                    for tool_name in agent_tools
+                )
+                and values
+                <= frozenset(
+                    tool_name
+                    for agent_tools in candidate.agent_tools
+                    for tool_name in agent_tools
+                )
             },
             "delegation": {
                 "enabled": candidate.agent_count > 1 and bool(candidate.control_tools),
@@ -685,12 +702,15 @@ def search_partitions(
         "search_strategy": "exhaustive" if exhaustive else "bounded",
         "pareto_scope": pareto_scope,
     }
-    manifest = {
+    manifest_raw = {
         "baseline_architecture_id": BASELINE_ARCHITECTURE_ID,
         "historical_tool_capability_tools": sorted(required_retained),
         "search_provenance": search_provenance,
         "architectures": architectures,
     }
+    manifest = serialize_architecture_manifest(
+        build_architecture_manifest(manifest_raw)
+    )
     report = {
         "search": {
             "max_agents": max_agents,

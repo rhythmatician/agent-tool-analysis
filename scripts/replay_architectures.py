@@ -15,6 +15,7 @@ from optimize_agent_tools.replay_harness import (
     build_architecture_manifest,
     compare_to_benchmark,
     replay_recorded_observations,
+    serialize_architecture_manifest,
 )
 
 
@@ -148,22 +149,12 @@ def _aggregate_report(result: Any, architecture: Any) -> dict[str, Any]:
 
 
 def _manifest_report(manifest: ArchitectureManifest) -> dict[str, Any]:
+    serialized = serialize_architecture_manifest(manifest)
     return {
-        "baseline_architecture_id": manifest.baseline_architecture_id,
-        "historical_tool_capability_tools": sorted(
-            manifest.historical_tool_capability_tools
-        ),
+        **serialized,
         "architectures": {
-            architecture.architecture_id: {
-                "parent_tools": sorted(architecture.parent_tools),
-                "topology": architecture.topology,
-                "agent_count": architecture.agent_count,
-                "agents": {
-                    agent_id: sorted(tools)
-                    for agent_id, tools in architecture.agent_tools.items()
-                },
-            }
-            for architecture in manifest.architectures
+            architecture["architecture_id"]: architecture
+            for architecture in serialized["architectures"]
         },
     }
 

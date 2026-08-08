@@ -10,6 +10,8 @@ from optimize_agent_tools.replay_harness import (  # noqa: E402
     historical_tool_capability_coverage,
     replay_recorded_observations,
     run_replay,
+    select_architecture_manifest,
+    serialize_architecture_manifest,
 )
 from replay_architectures import build_report  # noqa: E402
 
@@ -75,6 +77,57 @@ def test_manifest_supports_arbitrary_architectures_and_owns_its_baseline() -> No
         "review_agent": frozenset({"review_tool"}),
         "file_agent": frozenset({"file_tool"}),
     }
+
+
+def test_manifest_wire_contract_preserves_topology_and_provenance() -> None:
+    raw = manifest_raw()
+    raw["search_provenance"] = {"search_strategy": "bounded"}
+    raw["provisional_architecture_ids"] = ["two_agents"]
+    raw["architectures"][1] = {
+        **raw["architectures"][1],
+        "topology": "peer",
+        "agent_count": 2,
+        "parent_tools": [],
+        "agents": {
+            "review_agent": {
+                "tools": ["review_tool"],
+                "shared_tools": [],
+                "exclusive_tools": ["review_tool"],
+            },
+            "file_agent": {
+                "tools": ["file_tool"],
+                "shared_tools": [],
+                "exclusive_tools": ["file_tool"],
+            },
+        },
+        "shared_tools": [],
+        "delegation": {"edges": {"review_agent": ["file_agent"], "file_agent": []}},
+        "provisional": True,
+        "directional_only": True,
+        "assumptions": ["directional"],
+        "provenance": {"source": "test"},
+    }
+
+    manifest = build_architecture_manifest(raw)
+    wire = serialize_architecture_manifest(manifest)
+
+    assert wire["search_provenance"] == {"search_strategy": "bounded"}
+    candidate = wire["architectures"][1]
+    assert candidate["topology"] == "peer"
+    assert candidate["delegation"]["edges"]["review_agent"] == ["file_agent"]
+    assert candidate["provisional"] is True
+    assert candidate["provenance"] == {"source": "test"}
+
+
+def test_manifest_selection_keeps_validated_provenance() -> None:
+    raw = manifest_raw()
+    raw["search_provenance"] = {"search_strategy": "exhaustive"}
+    manifest = build_architecture_manifest(raw)
+
+    selected = select_architecture_manifest(manifest, (BASELINE_ARCHITECTURE_ID,))
+
+    assert selected.architecture_ids == (BASELINE_ARCHITECTURE_ID,)
+    assert selected.search_provenance == {"search_strategy": "exhaustive"}
 
 
 def test_peer_effective_tools_include_reachable_delegated_capabilities() -> None:
