@@ -15,7 +15,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
-from .telemetry_ingestion import Session, ToolRoleRecord
+from .telemetry_ingestion import EvidenceSession, ToolRoleRecord
 
 
 @dataclass(frozen=True)
@@ -76,12 +76,14 @@ def _validate_config(config: NMFConfig) -> None:
             raise ValueError(f"NMF {name} must be between 0 and 1.")
 
 
-def _matrix(sessions: Sequence[Session], tools: Sequence[str]) -> list[list[float]]:
+def _matrix(
+    sessions: Sequence[EvidenceSession], tools: Sequence[str]
+) -> list[list[float]]:
     tool_set = set(tools)
     return [
         [1.0 if tool in session.tool_set else 0.0 for tool in tools]
         for session in sessions
-        if session.calls
+        if session.called_tools
     ]
 
 
@@ -218,7 +220,9 @@ def _diagnostics(
     return diagnostics, [{"factor": factor + 1, "tools": sorted(values), "soft_lock": True} for factor, values in sorted(communities.items()) if values], sorted(ambiguous)
 
 
-def _control_summary(sessions: Sequence[Session], role_records: Mapping[str, ToolRoleRecord]) -> dict[str, Any]:
+def _control_summary(
+    sessions: Sequence[EvidenceSession], role_records: Mapping[str, ToolRoleRecord]
+) -> dict[str, Any]:
     control_tools = {name for name, record in role_records.items() if record.role != "domain"}
     sessions_used = {name: 0 for name in control_tools}
     calls = {name: 0 for name in control_tools}
@@ -228,14 +232,14 @@ def _control_summary(sessions: Sequence[Session], role_records: Mapping[str, Too
         role_counts[role_records[name].role] += 1
     for session in sessions:
         seen: set[str] = set()
-        for name in session.calls:
+        for name in session.called_tools:
             if name not in control_tools:
                 continue
             calls[name] += 1
             if name not in seen:
                 sessions_used[name] += 1
                 seen.add(name)
-        for left, right in zip(session.calls, session.calls[1:]):
+        for left, right in zip(session.called_tools, session.called_tools[1:]):
             if left in control_tools or right in control_tools:
                 adjacency[f"{left}->{right}"] += 1
     return {
@@ -267,7 +271,7 @@ def _control_summary(sessions: Sequence[Session], role_records: Mapping[str, Too
 
 
 def run_nmf_screening(
-    sessions: Iterable[Session],
+    sessions: Iterable[EvidenceSession],
     domain_tools: Iterable[str],
     role_records: Mapping[str, ToolRoleRecord],
     *,
@@ -275,7 +279,7 @@ def run_nmf_screening(
 ) -> NMFScreening:
     config = config or NMFConfig()
     _validate_config(config)
-    session_list = [session for session in sessions if session.calls]
+    session_list = [session for session in sessions if session.called_tools]
     tools = tuple(sorted(set(domain_tools)))
     control = _control_summary(session_list, role_records)
     if not tools or not session_list:

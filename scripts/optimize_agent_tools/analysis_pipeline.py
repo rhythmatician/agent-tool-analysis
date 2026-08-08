@@ -1746,6 +1746,8 @@ def build_architecture_options(
             "architecture_id": BASELINE_ARCHITECTURE_ID,
             "label": "Pruned single agent",
             "status": "baseline",
+            "topology": "flat",
+            "agent_count": 1,
             "parent_tools": list(baseline.get("tools_retained", [])),
             "agents": [],
             "why_choose": [
@@ -2063,6 +2065,11 @@ def _run_analysis(
         global_tools=global_tools,
     )
     retained_tools = set(pruned_flat_baseline["tools_retained"])
+    decomposition_control_tools = frozenset(
+        name
+        for name, record in classify_tool_roles(retained_tools).items()
+        if record.role in {"delegation", "coordination"}
+    )
     from .partition_search import search_partitions
 
     partition_result = _run_stage(
@@ -2079,7 +2086,7 @@ def _run_analysis(
             max_exhaustive_units=max_exhaustive_units,
             max_partition_candidates=max_partition_candidates,
             baseline_tools=retained_tools,
-            control_tools=CONTROL_PLANE_TOOLS,
+            control_tools=decomposition_control_tools,
             search_hints=nmf_screening.search_hints,
             exposure_model="observed_only",
         ),

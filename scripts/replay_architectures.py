@@ -118,10 +118,12 @@ def _task(raw: dict[str, Any], architecture_ids: tuple[str, ...]) -> ReplayTask:
     return ReplayTask(task_id=raw["task_id"], activation_paths=paths)
 
 
-def _aggregate_report(result: Any) -> dict[str, Any]:
+def _aggregate_report(result: Any, architecture: Any) -> dict[str, Any]:
     aggregate = result.aggregate
     return {
         "architecture_id": result.architecture_id,
+        "topology": architecture.topology,
+        "agent_count": architecture.agent_count,
         "task_count": aggregate.task_count,
         "task_success_rate": aggregate.task_success_rate,
         "historical_tool_capability_coverage_rate": aggregate.historical_tool_capability_coverage_rate,
@@ -154,6 +156,8 @@ def _manifest_report(manifest: ArchitectureManifest) -> dict[str, Any]:
         "architectures": {
             architecture.architecture_id: {
                 "parent_tools": sorted(architecture.parent_tools),
+                "topology": architecture.topology,
+                "agent_count": architecture.agent_count,
                 "agents": {
                     agent_id: sorted(tools)
                     for agent_id, tools in architecture.agent_tools.items()
@@ -221,7 +225,14 @@ def build_report(
             "routing_policy": "explicit per-architecture activation_paths only; no routing optimization",
         },
         "architectures": {
-            architecture_id: _aggregate_report(results[architecture_id])
+            architecture_id: _aggregate_report(
+                results[architecture_id],
+                next(
+                    architecture
+                    for architecture in manifest.architectures
+                    if architecture.architecture_id == architecture_id
+                ),
+            )
             for architecture_id in manifest.architecture_ids
         },
         "comparisons": comparisons,

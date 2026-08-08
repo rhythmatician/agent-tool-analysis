@@ -130,7 +130,13 @@ class DynamicToolGroup:
 
 
 @dataclass
-class Session:
+class EvidenceSession:
+    """Provider-neutral evidence collected for one telemetry session.
+
+    The legacy field names remain constructor-compatible while the semantic
+    properties below give analysis stages one stable vocabulary.
+    """
+
     session_id: str
     source: str
     calls: list[str] = field(default_factory=list)
@@ -139,6 +145,40 @@ class Session:
     provider_availability: set[str] = field(default_factory=set)
     provider_tools: dict[str, set[str]] = field(default_factory=dict)
     dynamic_tool_groups: list[DynamicToolGroup] = field(default_factory=list)
+
+    @property
+    def runtime(self) -> str:
+        return self.source
+
+    @property
+    def called_tools(self) -> tuple[str, ...]:
+        return tuple(self.calls)
+
+    @property
+    def direct_exposure(self) -> frozenset[str]:
+        return frozenset(self.exposed_tools)
+
+    @property
+    def exposure_provenance(self) -> str:
+        return self.exposure_source
+
+    @property
+    def available_providers(self) -> frozenset[str]:
+        return frozenset(self.provider_availability)
+
+    @property
+    def provider_tool_membership(self) -> dict[str, frozenset[str]]:
+        return {
+            provider: frozenset(tools)
+            for provider, tools in self.provider_tools.items()
+        }
+
+    @property
+    def has_direct_exposure(self) -> bool:
+        return bool(self.direct_exposure)
+
+    def is_runtime(self, runtime: str) -> bool:
+        return self.runtime == runtime
 
     @property
     def directly_observed_exposure(self) -> set[str]:
@@ -151,6 +191,11 @@ class Session:
     @property
     def tool_set(self) -> set[str]:
         return set(self.actual_calls)
+
+
+# Compatibility name retained for the existing public API and historical
+# fixtures. New analysis code should use EvidenceSession.
+Session = EvidenceSession
 
 
 def normalize_tool_name(raw_name: str | None) -> str | None:

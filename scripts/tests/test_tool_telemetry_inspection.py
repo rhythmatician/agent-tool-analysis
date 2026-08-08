@@ -24,6 +24,7 @@ from optimize_agent_tools.exposure_reporting import (
 from optimize_agent_tools.reporting import render_markdown
 from optimize_agent_tools.telemetry_ingestion import (
     DynamicToolGroup,
+    EvidenceSession,
     Session,
     extract_codex_calls,
     extract_codex_dynamic_tool_groups,
@@ -252,6 +253,36 @@ def test_codex_provider_metadata_requires_named_dynamic_tool_group() -> None:
 
     assert providers == {"github"}
     assert provider_tools == {"github": {"github.fetch_issue", "github.fetch_pr"}}
+
+
+def test_evidence_session_exposes_provider_neutral_call_and_exposure_semantics() -> None:
+    evidence = EvidenceSession(
+        "session-1",
+        "codex",
+        ["called"],
+        {"directly_exposed"},
+        exposure_source="codex:payload.dynamic_tools[].tools[].name",
+        provider_availability={"github"},
+        provider_tools={"github": {"directly_exposed"}},
+    )
+
+    assert evidence.runtime == "codex"
+    assert evidence.called_tools == ("called",)
+    assert evidence.direct_exposure == frozenset({"directly_exposed"})
+    assert evidence.exposure_provenance == (
+        "codex:payload.dynamic_tools[].tools[].name"
+    )
+    assert evidence.available_providers == frozenset({"github"})
+    assert evidence.provider_tool_membership == {
+        "github": frozenset({"directly_exposed"})
+    }
+    assert evidence.has_direct_exposure is True
+    assert evidence.is_runtime("codex") is True
+    assert evidence.is_runtime("vscode") is False
+
+
+def test_session_remains_a_compatibility_name_for_canonical_evidence() -> None:
+    assert Session is EvidenceSession
 
 
 def test_dynamic_tool_group_inventory_is_structural_and_privacy_safe() -> None:

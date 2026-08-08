@@ -119,6 +119,48 @@ def test_analysis_result_serializes_the_stable_report_shape() -> None:
     assert report is not result.report
 
 
+def test_normal_analysis_excludes_runtime_controls_from_decomposition() -> None:
+    sessions = [
+        Session("one", "codex", ["domain.alpha", "exec", "send_message"]),
+        Session("two", "codex", ["domain.beta", "exec", "wait_agent"]),
+    ]
+    definitions = {
+        name: _definition(name, 10)
+        for name in ("domain.alpha", "domain.beta", "exec", "send_message", "wait_agent")
+    }
+
+    report = analyze(
+        sessions,
+        definitions,
+        {},
+        explicit_path=None,
+        definition_roots=[],
+        min_tool_sessions=1,
+        similarity_threshold=0.35,
+        global_usage_threshold=1.0,
+        min_cluster_size=1,
+        min_cluster_sessions=1,
+        delegation_overhead_tokens=0,
+        max_agents=2,
+    )
+
+    retained = set(report["pruned_flat_baseline"]["tools_retained"])
+    assert {"exec", "send_message", "wait_agent"} <= retained
+    assert report["partition_search"]["search"]["control_tools"] == [
+        "send_message",
+        "wait",
+        "wait_agent",
+    ]
+    assert all(
+        control_tool not in unit
+        for unit in report["partition_search"]["search"]["partition_units"]
+        for control_tool in ("send_message", "wait", "wait_agent")
+    )
+    assert {
+        item["tool"] for item in report["nmf_screening"]["control_plane"]["tools"]
+    } == {"exec", "send_message", "wait_agent"}
+
+
 def test_analysis_failure_names_the_failing_stage(monkeypatch: pytest.MonkeyPatch) -> None:
     def fail(*args: object, **kwargs: object) -> dict[str, object]:
         raise RuntimeError("fixture failure")
