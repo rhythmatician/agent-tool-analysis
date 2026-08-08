@@ -2025,6 +2025,11 @@ def analyze(
         global_tools=global_tools,
     )
     retained_tools = set(pruned_flat_baseline["tools_retained"])
+    decomposition_control_tools = frozenset(
+        name
+        for name, record in classify_tool_roles(retained_tools).items()
+        if record.role in {"delegation", "coordination"}
+    )
     from .partition_search import search_partitions
 
     partition_result = search_partitions(
@@ -2039,7 +2044,7 @@ def analyze(
         max_exhaustive_units=max_exhaustive_units,
         max_partition_candidates=max_partition_candidates,
         baseline_tools=retained_tools,
-        control_tools=CONTROL_PLANE_TOOLS,
+        control_tools=decomposition_control_tools,
         search_hints=nmf_screening.search_hints,
         exposure_model="observed_only",
     )
