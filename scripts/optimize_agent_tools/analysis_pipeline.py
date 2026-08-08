@@ -53,6 +53,7 @@ from .tool_definition_registry import (
     ManifestDefinitionProvider,
     MappingDefinitionProvider,
 )
+from .topology_discovery import discover_topologies
 
 KNOWN_DEPENDENCIES = {
     "apply_patch": {"execute/runTests", "create_file"},
@@ -2107,6 +2108,7 @@ def _run_analysis(
             "assumptions": measurement["assumptions"],
         }
     )
+    topology_discovery = discover_topologies(sessions)
     variants = evaluate_architecture_variants(
         call_sessions,
         stats,
@@ -2315,6 +2317,7 @@ def _run_analysis(
         "architecture_manifest": manifest,
         "architecture_options": architecture_options,
         "partition_search": partition_result.report,
+        "topology_discovery": topology_discovery,
         "specialist_recommendation": {
             "action": "choose_architecture_option"
             if multiple_options

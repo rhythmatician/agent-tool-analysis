@@ -54,3 +54,12 @@ The normal command writes the candidate metrics into
 strict frozen `pruned_flat_baseline`; replay is an optional advanced validation
 step and rejects a mismatched benchmark report. Candidate generation is part of
 the normal analyze-and-recommend workflow.
+
+## Topology discovery
+
+The analysis report also includes a small, interpretable topology candidate set:
+`flat`, `peer`, and `coordinator_children`. It uses ordered transitions around
+delegation markers, pre/post-delegation tool families, return-to-caller signals,
+activation asymmetry, and origin symmetry. These are structural hypotheses only:
+telemetry without nested agent identities cannot establish semantic agent roles
+or prove a topology.

@@ -90,6 +90,9 @@ def test_normal_analysis_workflow_includes_generic_specialist_recommendation() -
         "pruned_flat_baseline"
     )
     assert report["partition_search"]["search"]["max_agents"] == 2
+    assert {
+        candidate["topology"] for candidate in report["topology_discovery"]["candidates"]
+    } == {"flat", "peer", "coordinator_children"}
 
 
 def test_analysis_result_serializes_the_stable_report_shape() -> None:

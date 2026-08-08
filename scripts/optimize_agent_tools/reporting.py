@@ -44,6 +44,25 @@ def render_markdown(report: dict[str, Any]) -> str:
         "## Specialist recommendation",
         "",
     ]
+    topology = report.get("topology_discovery")
+    if topology:
+        best = topology["best_candidate"]
+        evidence = topology["evidence"]
+        lines.extend(
+            [
+                "## Topology discovery",
+                "",
+                f"- Best current topology hypothesis: `{best['topology']}` ({best['score']:.1%}; confidence `{best['confidence']}`)",
+                f"- Delegation events: {evidence['delegation_events']}; return-to-caller events: {evidence['return_to_caller_events']}",
+                f"- Origin symmetry: {evidence['origin_symmetry']:.1%}; activation asymmetry: {evidence['activation_asymmetry']:.1%}",
+                "- Candidates: "
+                + ", ".join(
+                    f"`{candidate['topology']}` ({candidate['score']:.1%})"
+                    for candidate in topology["candidates"]
+                ),
+                "",
+            ]
+        )
     if specialist is None:
         lines.extend(["Partition search was not included in this report.", ""])
     else:
