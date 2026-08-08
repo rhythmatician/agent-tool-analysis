@@ -132,17 +132,23 @@ def _build_graph(
     sessions: list[EvidenceSession],
     tools: frozenset[str],
     excluded_tools: frozenset[str] = frozenset(),
+    session_weights: Mapping[str, float] | None = None,
 ) -> _Graph:
-    total_sessions = len(sessions)
-    total_calls = sum(len(session.called_tools) for session in sessions)
-    co_sessions: dict[tuple[str, str], int] = {}
-    adjacency: dict[tuple[str, str], int] = {}
+    weights = session_weights or {}
+    total_sessions = sum(weights.get(session.session_id, 1.0) for session in sessions)
+    total_calls = sum(
+        len(session.called_tools) * weights.get(session.session_id, 1.0)
+        for session in sessions
+    )
+    co_sessions: dict[tuple[str, str], float] = {}
+    adjacency: dict[tuple[str, str], float] = {}
     for session in sessions:
+        session_weight = weights.get(session.session_id, 1.0)
         session_tools = sorted((session.tool_set & tools) - excluded_tools)
         for index, left in enumerate(session_tools):
             for right in session_tools[index + 1 :]:
                 key = _pair_key(left, right)
-                co_sessions[key] = co_sessions.get(key, 0) + 1
+                co_sessions[key] = co_sessions.get(key, 0.0) + session_weight
         for left, right in zip(session.called_tools, session.called_tools[1:]):
             if (
                 left != right
@@ -152,7 +158,7 @@ def _build_graph(
                 and right not in excluded_tools
             ):
                 key = _pair_key(left, right)
-                adjacency[key] = adjacency.get(key, 0) + 1
+                adjacency[key] = adjacency.get(key, 0.0) + session_weight
     weights = {
         key: (co_sessions.get(key, 0) / total_sessions if total_sessions else 0.0)
         + (adjacency.get(key, 0) / total_calls if total_calls else 0.0)
@@ -304,6 +310,39 @@ def _order_units_by_hints(
             ),
         )
     )
+
+
+def _screened_units(
+    units: tuple[frozenset[str], ...], search_hints: Mapping[str, Any] | None
+) -> tuple[frozenset[str], ...]:
+    """Group dependency units into breakable NMF communities for the first search."""
+    communities = (search_hints or {}).get("strong_communities", ())
+    unit_indexes: dict[int, int] = {}
+    grouped: dict[int, set[str]] = {}
+    next_group = 0
+    for community in communities:
+        if not isinstance(community, Mapping):
+            continue
+        community_tools = set(community.get("tools", ()))
+        matching = [
+            index
+            for index, unit in enumerate(units)
+            if unit & community_tools and index not in unit_indexes
+        ]
+        if len(matching) < 2:
+            continue
+        for index in matching:
+            unit_indexes[index] = next_group
+            grouped.setdefault(next_group, set()).update(units[index])
+        next_group += 1
+
+    screened = [
+        unit
+        for index, unit in enumerate(units)
+        if index not in unit_indexes
+    ]
+    screened.extend(frozenset(grouped[index]) for index in sorted(grouped))
+    return tuple(sorted(screened, key=lambda unit: tuple(sorted(unit))))
 
 
 def _partition_tools(
@@ -537,6 +576,7 @@ def search_partitions(
     baseline_tools: Iterable[str] | None = None,
     exposure_model: str = "observed_only",
     search_hints: Mapping[str, Any] | None = None,
+    session_weights: Mapping[str, float] | None = None,
 ) -> PartitionSearchResult:
     """Search generic, dependency-closed partitions and retain their Pareto frontier."""
     if max_agents < 1:
@@ -572,60 +612,69 @@ def search_partitions(
     if not global_surface <= retained:
         raise ValueError("Global tools must be retained tools.")
     shared_seed = global_surface | control_surface
-    graph = _build_graph(session_list, retained, control_surface)
+    graph = _build_graph(session_list, retained, control_surface, session_weights)
     units = _dependency_units(retained, dependencies, shared_seed)
-    hinted_units = _order_units_by_hints(units, search_hints)
+    screened_units = _screened_units(units, search_hints)
+    hinted_units = _order_units_by_hints(screened_units, search_hints)
     all_candidates: list[PartitionCandidate] = []
     complete = True
     exhaustive = True
-    max_k = min(max_agents, len(hinted_units)) if hinted_units else (1 if retained else 0)
-    for agent_count in range(1, max_k + 1):
-        estimated = _stirling_second_kind(len(hinted_units), agent_count)
-        if len(hinted_units) <= max_exhaustive_units and estimated <= max_partition_candidates:
-            partitions = tuple(_set_partitions(hinted_units, agent_count))
-        else:
-            complete = False
-            exhaustive = False
-            partitions = _heuristic_partitions(
-                hinted_units, agent_count, graph, max_partition_candidates
-            )
-        for index, partition in enumerate(partitions, start=1):
-            sharing_choices = (
-                ((shared_seed, "exclusive"),)
-                if agent_count == 1
-                else _shared_variants(hinted_units, shared_seed, max_partition_candidates)
-            )
-            for shared_index, (shared, placement_strategy) in enumerate(
-                sharing_choices, start=1
-            ):
-                exclusive_partition = tuple(
-                    tuple(unit for unit in group if not unit <= shared)
-                    for group in partition
+    search_stages = (
+        ((hinted_units, "screened"),)
+        if screened_units != units
+        else ((hinted_units, "partition"),)
+    )
+    if screened_units != units:
+        search_stages += ((units, "refined"),)
+    for stage_units, stage_name in search_stages:
+        max_k = min(max_agents, len(stage_units)) if stage_units else (1 if retained else 0)
+        for agent_count in range(1, max_k + 1):
+            estimated = _stirling_second_kind(len(stage_units), agent_count)
+            if len(stage_units) <= max_exhaustive_units and estimated <= max_partition_candidates:
+                partitions = tuple(_set_partitions(stage_units, agent_count))
+            else:
+                complete = False
+                exhaustive = False
+                partitions = _heuristic_partitions(
+                    stage_units, agent_count, graph, max_partition_candidates
                 )
-                if agent_count == 1 and not exclusive_partition:
-                    exclusive_partition = ((),)
-                if len(exclusive_partition) != agent_count:
-                    continue
-                exclusive_tools = _partition_tools(exclusive_partition)
-                tools = tuple(
-                    tuple(sorted(set(group) | set(shared))) for group in exclusive_tools
+            for index, partition in enumerate(partitions, start=1):
+                sharing_choices = (
+                    ((shared_seed, "exclusive"),)
+                    if agent_count == 1
+                    else _shared_variants(stage_units, shared_seed, max_partition_candidates)
                 )
-                candidate = _candidate_metrics(
-                    f"partition_k{agent_count:02d}_{index:04d}_s{shared_index:04d}",
-                    tools,
-                    shared,
-                    control_surface,
-                    session_list,
-                    stats,
-                    retained,
-                    graph,
-                    dependencies,
-                    delegation_tokens_per_activation,
-                    communication_tokens_per_handoff,
-                    exposure_model,
-                    placement_strategy,
-                )
-                all_candidates.append(candidate)
+                for shared_index, (shared, placement_strategy) in enumerate(
+                    sharing_choices, start=1
+                ):
+                    exclusive_partition = tuple(
+                        tuple(unit for unit in group if not unit <= shared)
+                        for group in partition
+                    )
+                    if agent_count == 1 and not exclusive_partition:
+                        exclusive_partition = ((),)
+                    if len(exclusive_partition) != agent_count:
+                        continue
+                    exclusive_tools = _partition_tools(exclusive_partition)
+                    tools = tuple(
+                        tuple(sorted(set(group) | set(shared))) for group in exclusive_tools
+                    )
+                    candidate = _candidate_metrics(
+                        f"{stage_name}_k{agent_count:02d}_{index:04d}_s{shared_index:04d}",
+                        tools,
+                        shared,
+                        control_surface,
+                        session_list,
+                        stats,
+                        retained,
+                        graph,
+                        dependencies,
+                        delegation_tokens_per_activation,
+                        communication_tokens_per_handoff,
+                        exposure_model,
+                        placement_strategy,
+                    )
+                    all_candidates.append(candidate)
     frontier = _pareto(all_candidates)
     frontier_ids = {candidate.architecture_id for candidate in frontier}
     pareto_scope = "global" if exhaustive else "evaluated_subset"
@@ -727,11 +776,24 @@ def search_partitions(
             "pareto_scope": pareto_scope,
             "search_strategy": "exhaustive" if exhaustive else "bounded",
             "partition_units": [sorted(unit) for unit in units],
+            "frozen_partition_units": [sorted(unit) for unit in hinted_units],
+            "search_units_before_screening": len(units),
+            "search_units_after_screening": len(screened_units),
+            "search_units_after_refinement": len(units),
             "search_units_before_nmf": len(units),
-            "search_units_after_nmf": len(hinted_units),
-            "nmf_search_effect": "ordering_only",
-            "nmf_unit_count_reduction": len(units) - len(hinted_units),
+            "search_units_after_nmf": len(screened_units),
+            "nmf_search_effect": (
+                "frozen_then_refined" if screened_units != units else "no_reduction"
+            ),
+            "nmf_unit_count_reduction": len(units) - len(screened_units),
             "nmf_hints_applied": bool(search_hints),
+            "stages": [
+                {"name": "screen", "effective_search_units": len(units)},
+                {"name": "nmf", "effective_search_units": len(screened_units)},
+                {"name": "freeze", "effective_search_units": len(hinted_units)},
+                {"name": "search", "effective_search_units": len(hinted_units)},
+                {"name": "refine", "effective_search_units": len(units)},
+            ],
             "global_tools": sorted(global_surface),
             "control_tools": sorted(control_surface),
             "topology": "peer",

@@ -780,3 +780,49 @@ def test_all_global_surface_still_emits_a_k_one_candidate() -> None:
     assert result.manifest["architectures"][0]["architecture_id"] == (
         "pruned_flat_baseline"
     )
+
+
+def test_nmf_units_are_frozen_for_search_then_split_during_refinement() -> None:
+    result = search_partitions(
+        sessions=[
+            Session("one", "codex", ["a", "c"], {"a", "c"}),
+            Session("two", "codex", ["b", "d"], {"b", "d"}),
+        ],
+        stats={
+            name: SimpleNamespace(definition_tokens=10)
+            for name in ("a", "b", "c", "d")
+        },
+        required_tools={"a", "b", "c", "d"},
+        max_agents=2,
+        search_hints={
+            "strong_communities": [
+                {"factor": 1, "tools": ["a", "b"], "soft_lock": True},
+                {"factor": 2, "tools": ["c", "d"], "soft_lock": True},
+            ]
+        },
+    )
+
+    search = result.report["search"]
+    assert search["search_units_before_screening"] == 4
+    assert search["search_units_after_screening"] == 2
+    assert search["search_units_after_refinement"] == 4
+    assert search["stages"] == [
+        {"name": "screen", "effective_search_units": 4},
+        {"name": "nmf", "effective_search_units": 2},
+        {"name": "freeze", "effective_search_units": 2},
+        {"name": "search", "effective_search_units": 2},
+        {"name": "refine", "effective_search_units": 4},
+    ]
+    assert any(
+        candidate.agent_count == 2
+        and any(set(tools) == {"a", "b"} for tools in candidate.agent_tools)
+        and any(set(tools) == {"c", "d"} for tools in candidate.agent_tools)
+        for candidate in result.all_candidates
+    )
+    assert any(
+        candidate.agent_count == 2
+        and any(set(tools) == {"a", "c"} for tools in candidate.agent_tools)
+        and any(set(tools) == {"b", "d"} for tools in candidate.agent_tools)
+        for candidate in result.all_candidates
+    )
+    assert result.pareto_candidates

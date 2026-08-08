@@ -216,7 +216,41 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"- Strong communities: {'; '.join(format_tools(item.get('tools', [])) for item in hints.get('strong_communities', [])) or 'none'}",
                 f"- Ambiguous/cross-loading tools: {format_tools(hints.get('ambiguous_tools', []))}",
                 f"- Shared candidates: {format_tools(hints.get('shared_candidates', []))}",
-                f"- Search units: {len(hints.get('search_units', []))} soft units; partition search remains authoritative and currently uses them for ordering only",
+                f"- Search units: {len(hints.get('search_units', []))} soft units; dependencies remain hard locks and soft units are refined later",
+                "",
+            ]
+        )
+
+    partition_search = report.get("partition_search", {}).get("search")
+    if partition_search:
+        stage_summary = ", ".join(
+            f"{stage['name']} ({stage['effective_search_units']})"
+            for stage in partition_search.get("stages", [])
+        )
+        lines.extend(
+            [
+                "## Staged partition search",
+                "",
+                f"- Effective units before screening: {partition_search.get('search_units_before_screening', 0)}",
+                f"- Effective units after NMF screening/freeze: {partition_search.get('search_units_after_screening', 0)}",
+                f"- Effective units after refinement: {partition_search.get('search_units_after_refinement', 0)}",
+                f"- Search stages: {stage_summary}",
+                "",
+            ]
+        )
+
+    freshness = report.get("freshness")
+    if freshness:
+        lines.extend(
+            [
+                "## Freshness and maturity",
+                "",
+                f"- Exponential half-life: {freshness['config']['half_life_days']:.1f} days",
+                f"- Lifetime-required tools (never removed by decay): {format_tools(freshness.get('lifetime_required', []))}",
+                f"- Current tools: {format_tools(freshness.get('current', []))}",
+                f"- Currently low-frequency tools: {format_tools(freshness.get('currently_low_frequency', []))}",
+                f"- Trial MCP tools: {format_tools(freshness.get('trial', []))}",
+                f"- Trial workload opportunities: {len(report.get('trial_workload_opportunities', []))}",
                 "",
             ]
         )

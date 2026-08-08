@@ -215,6 +215,15 @@ communication cost estimates.
 
 The dependency-closed, dead-tool-pruned flat agent is the baseline to beat. Separate directly observed exposure, historical calls, inferred exposure, and unresolved exposure; missing evidence is not evidence of absence.
 
+Freshness is a separate signal from lifetime safety. Session evidence uses an
+exponential decay weight (default half-life 30 days, configurable through the
+CLI) for current NMF and partition-search signals. The lifetime-required set
+always includes every historically called tool, regardless of its current
+weight. Reports distinguish lifetime-required, current, currently-low-frequency,
+and trial tools. A provider-backed tool first observed within the default 14-day
+trial window is not treated as useless because its usage is sparse; its co-used
+historical workloads are reported as trial evaluation opportunities.
+
 Peer agents are worth considering only when duplicated shared context plus delegation and communication overhead plausibly beats the flat baseline without losing historically required capabilities. Prefer a simpler split over a larger one when the benefit is similar. A pruned flat agent is a valid recommendation.
 
 Host tool selectors are a separate translation problem. Never emit telemetry

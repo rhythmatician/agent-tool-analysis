@@ -65,8 +65,11 @@ def _validate_config(config: NMFConfig) -> None:
         raise ValueError("NMF seeds must not be empty.")
     if config.iterations < 1:
         raise ValueError("NMF iterations must be positive.")
-    if config.matrix_mode != "binary_session_usage":
-        raise ValueError("Only binary_session_usage is currently supported.")
+    if config.matrix_mode not in {
+        "binary_session_usage",
+        "freshness_weighted_session_usage",
+    }:
+        raise ValueError("Unsupported NMF matrix mode.")
     for name, value in (
         ("dominant_loading_threshold", config.dominant_loading_threshold),
         ("loading_margin_threshold", config.loading_margin_threshold),
@@ -77,10 +80,17 @@ def _validate_config(config: NMFConfig) -> None:
 
 
 def _matrix(
-    sessions: Sequence[EvidenceSession], tools: Sequence[str]
+    sessions: Sequence[EvidenceSession],
+    tools: Sequence[str],
+    session_weights: Mapping[str, float] | None = None,
 ) -> list[list[float]]:
     return [
-        [1.0 if tool in session.tool_set else 0.0 for tool in tools]
+        [
+            (session_weights or {}).get(session.session_id, 1.0)
+            if tool in session.tool_set
+            else 0.0
+            for tool in tools
+        ]
         for session in sessions
         if session.called_tools
     ]
@@ -275,6 +285,7 @@ def run_nmf_screening(
     role_records: Mapping[str, ToolRoleRecord],
     *,
     config: NMFConfig | None = None,
+    session_weights: Mapping[str, float] | None = None,
 ) -> NMFScreening:
     config = config or NMFConfig()
     _validate_config(config)
@@ -288,7 +299,7 @@ def run_nmf_screening(
         )
     )
     control = _control_summary(session_list, role_records)
-    matrix_rows = _matrix(session_list, tools) if tools else []
+    matrix_rows = _matrix(session_list, tools, session_weights) if tools else []
     matrix_sessions = [
         session.session_id for session in session_list if session.called_tools
     ]
