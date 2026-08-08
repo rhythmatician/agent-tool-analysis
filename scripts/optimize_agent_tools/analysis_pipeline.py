@@ -5,9 +5,10 @@ from __future__ import annotations
 import itertools
 import math
 import statistics
+from copy import deepcopy
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping, TypeVar
 
 from .clustering import (
     agglomerative_clusters,
@@ -63,6 +64,37 @@ KNOWN_DEPENDENCIES = {
 ESTIMATION_BASIS = "global distribution of resolved definition tokens (25th percentile / median / 75th percentile)"
 DECISION_GITHUB_EXPOSURE_RATES = (0.25, 0.50, 0.75, 1.0)
 DECISION_DELEGATION_OVERHEADS = (0, 100, 250, 500)
+_StageValue = TypeVar("_StageValue")
+
+
+class AnalysisStageError(RuntimeError):
+    """A workflow stage failed while producing the analysis result."""
+
+    def __init__(self, stage: str, cause: Exception) -> None:
+        self.stage = stage
+        self.cause = cause
+        super().__init__(f"{stage} stage failed: {cause}")
+
+
+@dataclass(frozen=True)
+class AnalysisWorkflowResult:
+    """Typed boundary between workflow execution and report serialization."""
+
+    report: dict[str, Any]
+
+    def serialize(self) -> dict[str, Any]:
+        """Return an isolated report for JSON and Markdown consumers."""
+
+        return deepcopy(self.report)
+
+
+def _run_stage(stage: str, operation: Callable[[], _StageValue]) -> _StageValue:
+    try:
+        return operation()
+    except AnalysisStageError:
+        raise
+    except Exception as error:
+        raise AnalysisStageError(stage, error) from error
 
 
 def load_explicit_tool_costs(path: str | None) -> dict[str, int]:
@@ -1879,7 +1911,7 @@ def definition_resolution_report(
     return rows
 
 
-def analyze(
+def _run_analysis(
     sessions: list[Session],
     vscode_definitions: dict[str, DefinitionRecord],
     codex_definitions: dict[str, DefinitionRecord],
@@ -1900,7 +1932,7 @@ def analyze(
     nmf_max_factors: int = 4,
     nmf_seeds: Iterable[int] = (0, 1, 2),
     nmf_iterations: int = 160,
-) -> dict[str, Any]:
+) -> AnalysisWorkflowResult:
     if max_agents < 1:
         raise ValueError("max_agents must be at least 1.")
     if communication_tokens_per_handoff < 0:
@@ -1914,21 +1946,27 @@ def analyze(
         | set(vscode_definitions)
         | set(codex_definitions)
     )
-    definitions, registry, _manifest, discovery = acquire_definitions(
-        observed_names,
-        vscode_definitions,
-        codex_definitions,
-        explicit_path,
-        definition_roots,
+    definitions, registry, _manifest, discovery = _run_stage(
+        "definition acquisition",
+        lambda: acquire_definitions(
+            observed_names,
+            vscode_definitions,
+            codex_definitions,
+            explicit_path,
+            definition_roots,
+        ),
     )
     call_sessions = [session for session in sessions if session.calls]
     exposure_sessions = [session for session in sessions if session.exposed_tools]
-    stats = build_stats(
-        sessions,
-        definitions,
-        load_explicit_tool_costs(explicit_path),
-        call_sessions=call_sessions,
-        exposure_sessions=exposure_sessions,
+    stats = _run_stage(
+        "statistics",
+        lambda: build_stats(
+            sessions,
+            definitions,
+            load_explicit_tool_costs(explicit_path),
+            call_sessions=call_sessions,
+            exposure_sessions=exposure_sessions,
+        ),
     )
     role_records = classify_tool_roles(stats)
     classifications = classify_tools(stats, global_usage_threshold)
@@ -2027,21 +2065,24 @@ def analyze(
     retained_tools = set(pruned_flat_baseline["tools_retained"])
     from .partition_search import search_partitions
 
-    partition_result = search_partitions(
-        sessions=call_sessions,
-        stats=stats,
-        required_tools=retained_tools,
-        global_tools=global_tools,
-        dependencies=KNOWN_DEPENDENCIES,
-        max_agents=max_agents,
-        communication_tokens_per_handoff=communication_tokens_per_handoff,
-        delegation_tokens_per_activation=delegation_overhead_tokens,
-        max_exhaustive_units=max_exhaustive_units,
-        max_partition_candidates=max_partition_candidates,
-        baseline_tools=retained_tools,
-        control_tools=CONTROL_PLANE_TOOLS,
-        search_hints=nmf_screening.search_hints,
-        exposure_model="observed_only",
+    partition_result = _run_stage(
+        "partition search",
+        lambda: search_partitions(
+            sessions=call_sessions,
+            stats=stats,
+            required_tools=retained_tools,
+            global_tools=global_tools,
+            dependencies=KNOWN_DEPENDENCIES,
+            max_agents=max_agents,
+            communication_tokens_per_handoff=communication_tokens_per_handoff,
+            delegation_tokens_per_activation=delegation_overhead_tokens,
+            max_exhaustive_units=max_exhaustive_units,
+            max_partition_candidates=max_partition_candidates,
+            baseline_tools=retained_tools,
+            control_tools=CONTROL_PLANE_TOOLS,
+            search_hints=nmf_screening.search_hints,
+            exposure_model="observed_only",
+        ),
     )
     measurement = frontier_measurement_summary(
         sessions,
@@ -2231,7 +2272,7 @@ def analyze(
             "No cost-complete empirical Pareto candidates or directional "
             "specialist recommendation is supported by the available evidence."
         )
-    return {
+    return AnalysisWorkflowResult({
         "config": {
             "min_tool_sessions": min_tool_sessions,
             "similarity_threshold": similarity_threshold,
@@ -2332,4 +2373,52 @@ def analyze(
             "active_tools_for_clustering": len(active_tools),
             "sources": source_summary(sessions),
         },
-    }
+    })
+
+
+def analyze(
+    sessions: list[Session],
+    vscode_definitions: dict[str, DefinitionRecord],
+    codex_definitions: dict[str, DefinitionRecord],
+    *,
+    explicit_path: str | None,
+    definition_roots: Iterable[str],
+    min_tool_sessions: int,
+    similarity_threshold: float,
+    global_usage_threshold: float,
+    min_cluster_size: int,
+    min_cluster_sessions: int,
+    delegation_overhead_tokens: int,
+    max_agents: int = 3,
+    communication_tokens_per_handoff: float = 0.0,
+    max_exhaustive_units: int = 10,
+    max_partition_candidates: int = 5000,
+    github_exposure_rates: Iterable[float] = DEFAULT_GITHUB_EXPOSURE_RATES,
+    nmf_max_factors: int = 4,
+    nmf_seeds: Iterable[int] = (0, 1, 2),
+    nmf_iterations: int = 160,
+) -> dict[str, Any]:
+    """Run the analysis workflow and return its stable serialized report."""
+
+    result = _run_analysis(
+        sessions,
+        vscode_definitions,
+        codex_definitions,
+        explicit_path=explicit_path,
+        definition_roots=definition_roots,
+        min_tool_sessions=min_tool_sessions,
+        similarity_threshold=similarity_threshold,
+        global_usage_threshold=global_usage_threshold,
+        min_cluster_size=min_cluster_size,
+        min_cluster_sessions=min_cluster_sessions,
+        delegation_overhead_tokens=delegation_overhead_tokens,
+        max_agents=max_agents,
+        communication_tokens_per_handoff=communication_tokens_per_handoff,
+        max_exhaustive_units=max_exhaustive_units,
+        max_partition_candidates=max_partition_candidates,
+        github_exposure_rates=github_exposure_rates,
+        nmf_max_factors=nmf_max_factors,
+        nmf_seeds=nmf_seeds,
+        nmf_iterations=nmf_iterations,
+    )
+    return result.serialize()
