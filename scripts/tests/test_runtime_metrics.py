@@ -80,6 +80,10 @@ def test_replay_adapter_keeps_selection_and_coordination_separate() -> None:
             cached_input_tokens=20,
             billed_input_tokens=80,
             tool_selection_failures=2,
+            configured_definitions=("exec", "file"),
+            loaded_definitions=("exec",),
+            deferred_definitions=("file",),
+            selected_tools=("exec",),
         )
     )
 
@@ -91,7 +95,8 @@ def test_replay_adapter_keeps_selection_and_coordination_separate() -> None:
     assert metrics.tokens.billed_input.value == 80
     assert metrics.tokens.uncached_input.value == 80
     assert metrics.tokens.uncached_input.evidence.status == "inferred"
-    assert metrics.definitions.loaded.evidence.status == "unavailable"
+    assert metrics.definitions.loaded.value == ("exec",)
+    assert metrics.definitions.loaded.evidence.status == "measured"
 
 
 def test_metric_rejects_missing_value_without_unavailable_evidence() -> None:

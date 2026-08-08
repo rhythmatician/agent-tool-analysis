@@ -461,6 +461,10 @@ class ReplayObservation:
     billed_input_tokens: int | None = None
     cached_input_tokens: int | None = None
     tool_selection_failures: int = 0
+    configured_definitions: tuple[str, ...] | None = None
+    loaded_definitions: tuple[str, ...] | None = None
+    deferred_definitions: tuple[str, ...] | None = None
+    selected_tools: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
