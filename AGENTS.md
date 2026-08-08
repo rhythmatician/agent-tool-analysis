@@ -1,5 +1,9 @@
 ## Agent skills
 
+### Coding
+
+Use YAGNI and DRY principles.
+
 ### Issue tracker
 
 Issues live in GitHub Issues via the `gh` CLI. See `docs/agents/issue-tracker.md`.
