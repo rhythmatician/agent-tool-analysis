@@ -592,6 +592,43 @@ def test_search_generates_closed_manifest_candidates_and_metrics() -> None:
     assert candidate.dependency_closed is True
 
 
+def test_search_limits_placement_choices_to_exclusive_or_shared_all() -> None:
+    result = search_partitions(
+        sessions=[
+            Session("one", "codex", ["a"], {"a", "b", "shared"}),
+            Session("two", "codex", ["b"], {"a", "b", "shared"}),
+        ],
+        stats=_stats(),
+        required_tools={"a", "b"},
+        global_tools={"shared"},
+        dependencies={"a": {"dep_a"}},
+        max_agents=2,
+    )
+
+    retained = {"a", "b", "dep_a", "shared"}
+    two_agent = [
+        candidate for candidate in result.all_candidates if candidate.agent_count == 2
+    ]
+
+    assert {candidate.placement_strategy for candidate in two_agent} == {
+        "exclusive",
+        "shared_all",
+    }
+    assert {
+        frozenset(candidate.shared_tools)
+        for candidate in two_agent
+    } == {frozenset({"shared"}), frozenset(retained)}
+    assert {
+        architecture["placement_strategy"]
+        for architecture in result.manifest["architectures"]
+        if architecture["agent_count"] == 2
+    } <= {"exclusive", "shared_all"}
+    assert all(
+        set().union(*(set(tools) for tools in candidate.agent_tools)) == retained
+        for candidate in two_agent
+    )
+
+
 def test_search_retains_only_non_dominated_candidates_in_frontier() -> None:
     sessions = [
         Session("one", "codex", ["a"], {"a"}),
