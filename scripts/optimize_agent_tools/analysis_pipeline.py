@@ -1714,6 +1714,8 @@ def build_architecture_options(
             "architecture_id": BASELINE_ARCHITECTURE_ID,
             "label": "Pruned single agent",
             "status": "baseline",
+            "topology": "flat",
+            "agent_count": 1,
             "parent_tools": list(baseline.get("tools_retained", [])),
             "agents": [],
             "why_choose": [

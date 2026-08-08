@@ -12,6 +12,12 @@ Use `architecture_manifest.example.json` as the schema example. Each architectur
 - `parent_tools`;
 - `agents`, mapping arbitrary agent IDs to arbitrary tool lists.
 
+`agent_count` is the total number of actual agents. Peer architectures have one
+actual agent per `agents` entry and no implicit parent. A
+`coordinator_specialists` architecture counts the coordinator represented by
+`parent_tools` plus its specialist entries; this is the only remaining
+representation mismatch. Flat baselines always have one actual agent.
+
 The manifest also declares `baseline_architecture_id` and the historical tool-capability set. The parser rejects a drifted `pruned_flat_baseline` surface.
 
 ## Activation paths and measurements
