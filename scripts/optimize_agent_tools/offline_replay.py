@@ -5,7 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from .replay_harness import BASELINE_ARCHITECTURE_ID
+from .replay_harness import (
+    BASELINE_ARCHITECTURE_ID,
+    build_architecture_manifest,
+    serialize_architecture_manifest,
+)
 
 
 @dataclass(frozen=True)
@@ -18,12 +22,8 @@ class ReplayReadiness:
 
 
 def _architecture_ids(report: Mapping[str, Any]) -> tuple[str, ...]:
-    manifest = report.get("architecture_manifest") or {}
-    return tuple(
-        architecture.get("architecture_id")
-        for architecture in manifest.get("architectures", [])
-        if isinstance(architecture, Mapping)
-    )
+    manifest = build_architecture_manifest(report["architecture_manifest"])
+    return manifest.architecture_ids
 
 
 def assess_recorded_replay(
@@ -37,6 +37,11 @@ def assess_recorded_replay(
     """
 
     reasons: list[str] = []
+    try:
+        report_manifest = build_architecture_manifest(report["architecture_manifest"])
+        report_manifest_wire = serialize_architecture_manifest(report_manifest)
+    except (AttributeError, KeyError, TypeError, ValueError) as error:
+        return ReplayReadiness(False, None, (f"analysis architecture manifest is invalid: {error}",))
     metadata = bundle.get("metadata")
     if not isinstance(metadata, Mapping):
         reasons.append("replay bundle metadata is missing")
@@ -49,10 +54,18 @@ def assess_recorded_replay(
             reasons.append("replay bundle is not explicitly side-effect-free")
         if metadata.get("executor") != "recorded_observations":
             reasons.append("replay executor is not explicitly recorded_observations")
-        if metadata.get("architecture_manifest") != report.get("architecture_manifest"):
-            reasons.append(
-                "replay bundle architecture manifest does not exactly match analysis"
+        bundle_manifest = metadata.get("architecture_manifest")
+        try:
+            bundle_manifest_wire = serialize_architecture_manifest(
+                build_architecture_manifest(bundle_manifest)
             )
+        except (AttributeError, TypeError, ValueError) as error:
+            reasons.append(f"replay bundle architecture manifest is invalid: {error}")
+        else:
+            if bundle_manifest_wire != report_manifest_wire:
+                reasons.append(
+                    "replay bundle architecture manifest does not exactly match analysis"
+                )
 
     recommendation = report.get("specialist_recommendation") or {}
     candidate_id = recommendation.get("best_guess_candidate_id")
@@ -60,7 +73,7 @@ def assess_recorded_replay(
         reasons.append("no named candidate architecture is available for replay")
         candidate_id = None
 
-    architecture_ids = _architecture_ids(report)
+    architecture_ids = report_manifest.architecture_ids
     if candidate_id is not None and candidate_id not in architecture_ids:
         reasons.append(
             f"candidate architecture {candidate_id!r} is absent from the manifest"
@@ -83,9 +96,7 @@ def assess_recorded_replay(
     manifest_architecture = next(
         (
             architecture
-            for architecture in (report.get("architecture_manifest") or {}).get(
-                "architectures", []
-            )
+            for architecture in report_manifest_wire.get("architectures", [])
             if isinstance(architecture, Mapping)
             and architecture.get("architecture_id") == candidate_id
         ),
@@ -188,8 +199,9 @@ def run_recorded_replay(
     benchmark = {
         "pruned_flat_baseline": report["pruned_flat_baseline"],
     }
+    manifest = build_architecture_manifest(report["architecture_manifest"])
     return build_report(
         dict(bundle),
         benchmark,
-        report["architecture_manifest"],
+        serialize_architecture_manifest(manifest),
     )

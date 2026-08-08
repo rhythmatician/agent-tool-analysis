@@ -19,6 +19,8 @@ from .replay_harness import (
     ReplayObservation,
     ReplayTask,
     build_architecture_manifest,
+    select_architecture_manifest,
+    serialize_architecture_manifest,
 )
 
 CaptureExecutor = Callable[
@@ -73,51 +75,10 @@ def paired_architecture_manifest(
         raise ValueError("The capture candidate must not be the frozen baseline.")
     if candidate_id not in manifest.architecture_ids:
         raise ValueError(f"Unknown capture candidate architecture: {candidate_id!r}.")
-    selected = {
-        architecture.architecture_id
-        for architecture in manifest.architectures
-        if architecture.architecture_id in {BASELINE_ARCHITECTURE_ID, candidate_id}
-    }
-    return {
-        "baseline_architecture_id": manifest.baseline_architecture_id,
-        "historical_tool_capability_tools": sorted(
-            manifest.historical_tool_capability_tools
-        ),
-        "search_provenance": dict(manifest_raw.get("search_provenance", {})),
-        "provisional_architecture_ids": [
-            architecture_id
-            for architecture_id in manifest_raw.get("provisional_architecture_ids", [])
-            if architecture_id in selected
-        ],
-        "architectures": [
-            {
-                "architecture_id": architecture.architecture_id,
-                "parent_tools": sorted(architecture.parent_tools),
-                "agents": {
-                    agent_id: sorted(tools)
-                    for agent_id, tools in architecture.agent_tools.items()
-                },
-                **(
-                    {
-                        "provisional": True,
-                        "directional_only": True,
-                        "assumptions": manifest_raw["architectures"][
-                            manifest.architecture_ids.index(architecture.architecture_id)
-                        ].get("assumptions", []),
-                        "provenance": manifest_raw["architectures"][
-                            manifest.architecture_ids.index(architecture.architecture_id)
-                        ].get("provenance", {}),
-                    }
-                    if architecture.architecture_id in manifest_raw.get(
-                        "provisional_architecture_ids", []
-                    )
-                    else {}
-                ),
-            }
-            for architecture in manifest.architectures
-            if architecture.architecture_id in selected
-        ],
-    }
+    selected = select_architecture_manifest(
+        manifest, (BASELINE_ARCHITECTURE_ID, candidate_id)
+    )
+    return serialize_architecture_manifest(selected)
 
 
 def capture_paired_observations(

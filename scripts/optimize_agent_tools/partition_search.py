@@ -11,6 +11,8 @@ from optimize_agent_tools.exposure_models import (
 )
 from optimize_agent_tools.replay_harness import (
     BASELINE_ARCHITECTURE_ID,
+    build_architecture_manifest,
+    serialize_architecture_manifest,
 )
 from optimize_agent_tools.telemetry_ingestion import (
     CONTROL_PLANE_TOOLS,
@@ -679,12 +681,15 @@ def search_partitions(
         "search_strategy": "exhaustive" if exhaustive else "bounded",
         "pareto_scope": pareto_scope,
     }
-    manifest = {
+    manifest_raw = {
         "baseline_architecture_id": BASELINE_ARCHITECTURE_ID,
         "historical_tool_capability_tools": sorted(required_retained),
         "search_provenance": search_provenance,
         "architectures": architectures,
     }
+    manifest = serialize_architecture_manifest(
+        build_architecture_manifest(manifest_raw)
+    )
     report = {
         "search": {
             "max_agents": max_agents,
