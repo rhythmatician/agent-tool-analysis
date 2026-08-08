@@ -262,7 +262,7 @@ def test_directional_structure_gets_provisional_best_guess() -> None:
     assert "quality" in recommendation["required_validation"]
 
 
-def test_zero_to_positive_counterfactual_range_remains_directional() -> None:
+def test_zero_to_positive_counterfactual_range_is_not_supported() -> None:
     recommendation = classify_specialist_recommendation(
         pareto_candidates=[],
         candidate_agents=[
@@ -292,11 +292,8 @@ def test_zero_to_positive_counterfactual_range_remains_directional() -> None:
         search_complete=False,
     )
 
-    assert recommendation["status"] == "provisional"
-    assert recommendation["direction"] == "2-agent architecture"
-    assert any(
-        "smallest multi-agent split" in reason for reason in recommendation["why"]
-    )
+    assert recommendation["status"] == "none"
+    assert recommendation["direction"] is None
 
 
 def test_contradictory_directional_evidence_gets_no_recommendation() -> None:
@@ -354,7 +351,7 @@ def test_complete_evidence_without_quality_gate_is_still_provisional() -> None:
     assert recommendation["confidence"] == "moderate"
 
 
-def test_directional_hypothesis_materializes_separately_from_pareto_frontier() -> None:
+def test_directional_hypothesis_without_partition_candidate_does_not_materialize() -> None:
     recommendation = {
         "status": "provisional",
         "direction": "2-agent architecture",
@@ -383,21 +380,55 @@ def test_directional_hypothesis_materializes_separately_from_pareto_frontier() -
         dependencies={"a": {"dep_a"}},
     )
 
-    assert manifest_entry is not None
-    assert manifest_entry["architecture_id"] == "provisional_two_agents"
-    assert manifest_entry["provisional"] is True
-    assert manifest_entry["directional_only"] is True
-    assert manifest_entry["topology"] == "peer"
-    assert manifest_entry["agent_count"] == 2
-    assert "parent_tools" not in manifest_entry
-    assert manifest_entry["agents"]["agent_01"]["exclusive_tools"] == ["a", "dep_a"]
+    assert manifest_entry is None
+
+
+def test_incoherent_partition_candidate_does_not_materialize() -> None:
+    recommendation = {
+        "status": "provisional",
+        "direction": "2-agent architecture",
+    }
+    candidate = {
+        "architecture_id": "partition_k02_0001",
+        "agent_count": 2,
+        "agent_tools": [
+            ["github.fetch_issue", "github.fetch_pr"],
+            ["github.update_pull_request"],
+        ],
+        "exclusive_tools": [
+            ["github.fetch_issue", "github.fetch_pr"],
+            ["github.update_pull_request"],
+        ],
+        "shared_tools": [],
+        "control_tools": [],
+        "is_cost_complete": False,
+        "is_pareto_optimal": False,
+        "pareto_scope": "evaluated_subset",
+    }
+
     assert (
-        manifest_entry["provenance"]["source"]
-        == "directional_structure_and_sensitivity"
+        materialize_provisional_architecture(
+            recommendation=recommendation,
+            candidate_agents=[],
+            directional_variants=[],
+            retained_tools={
+                "github.fetch_issue",
+                "github.fetch_pr",
+                "github.update_pull_request",
+            },
+            global_tools=set(),
+            search_provenance={
+                "search_complete": False,
+                "search_strategy": "bounded",
+                "pareto_scope": "evaluated_subset",
+            },
+            search_candidates=[candidate],
+        )
+        is None
     )
 
 
-def test_provisional_analysis_exposes_baseline_and_concrete_two_specialist_option() -> (
+def test_incomplete_provisional_analysis_exposes_only_the_flat_baseline() -> (
     None
 ):
     sessions = [
@@ -448,21 +479,12 @@ def test_provisional_analysis_exposes_baseline_and_concrete_two_specialist_optio
 
     options = report["architecture_options"]
     assert [option["architecture_id"] for option in options] == [
-        "pruned_flat_baseline",
-        "provisional_two_agents",
+        "pruned_flat_baseline"
     ]
-    specialist = options[1]
-    assert specialist["status"] == "provisional"
-    assert specialist["topology"] == "peer"
-    assert specialist["agent_count"] == 2
-    assert len(specialist["agents"]) == 2
-    assert all(
-        agent["semantic_status"] == "provisional" for agent in specialist["agents"]
-    )
+    assert report["specialist_recommendation"]["status"] == "none"
     markdown = render_markdown(report)
     assert "Option 1 — Pruned single agent" in markdown
-    assert "Option 2 — Two cooperating agents" in markdown
-    assert "optional advanced follow-up" in markdown
+    assert "Option 2 — Two cooperating agents" not in markdown
 
 
 def test_architecture_options_keep_empirical_finalists_visible() -> None:
