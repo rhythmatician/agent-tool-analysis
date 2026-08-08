@@ -51,6 +51,47 @@ always includes the dependency-closed `pruned_flat_baseline`, and adds the
 strongest concrete empirical finalist(s) or provisional specialist hypothesis
 when those are coherent.
 
+## Host targeting
+
+Before generating definitions after an architecture choice, resolve the
+current host and destination. Use this precedence:
+
+1. An explicit host or scope supplied by the user.
+2. Reliable current-runtime context (the host in which this skill was invoked).
+3. Installed host markers only as a fallback; installation alone does not prove
+   which host the user wants.
+
+Record the result internally as:
+
+- **Detected host:** `Codex`, `GitHub Copilot`, or `unknown`;
+- **Agent format:** `known`, `unsupported`, or `ambiguous`; and
+- **Destination:** a resolved path or `ask user`.
+
+For the supported hosts in this environment:
+
+- **Codex:** use standalone `.toml` custom-agent files. Prefer the current
+  workspace's `.codex/agents/` directory for project-scoped definitions; use
+  `~/.codex/agents/` only when the user explicitly requests user scope. Each
+  file must contain Codex's required `name`, `description`, and
+  `developer_instructions` fields. Codex custom-agent files do not provide a
+  Copilot-style per-agent tool list, so preserve the inferred responsibility
+  and tool membership in the instructions without claiming that the TOML
+  enforces tool isolation.
+- **GitHub Copilot:** use `.agent.md` files with YAML frontmatter. Prefer the
+  current workspace's `.github/agents/` directory for project-scoped
+  definitions; use `~/.copilot/agents/` only when the user explicitly requests
+  user scope. Include a meaningful `description` and the supported tool list
+  for each specialist.
+
+Create the destination directory when its parent workspace/profile is known
+and the destination is otherwise unambiguous. If the active host is unknown,
+more than one host is genuinely plausible, the requested format is unsupported
+or ambiguous, or the destination cannot be resolved, ask one concise question:
+
+> Which host should I generate these agents for: Codex, GitHub Copilot, or something else?
+
+Do not ask about replay at this point.
+
 ## Default user-facing response
 
 The normal response is a decision aid, not an implementation or telemetry
@@ -132,24 +173,28 @@ option. Do not send them to replay first. Enter the generation branch:
 
 1. Load the selected option from the architecture manifest and inspect its
   actual parent, specialist, and shared-tool membership.
-2. Infer each working set's semantic responsibility from the tool families and
+2. Detect the active host, resolve its supported agent format and default
+  destination, and apply the host-targeting rules above.
+3. Infer each working set's semantic responsibility from the tool families and
   metadata; replace anonymous IDs with useful names and concise routing
   descriptions. Treat these names and routes as hypotheses and flag any
   ambiguity. Names must be derived only from the selected membership; do not
   force a broader responsibility than the tools support.
-3. Write the proposed agent names, routing instructions, and host-specific
+4. Write the proposed agent names, routing instructions, and host-specific
   agent definitions for the selected architecture and create them directly
   when the destinations are new and unambiguous. Report exactly what was
   created and where.
-4. Ask for confirmation instead of creating files only if an existing file
+5. Ask for confirmation instead of creating files only if an existing file
   would be overwritten, existing agent/MCP/plugin/IDE configuration would be
   modified, the destination is ambiguous, or the host-specific agent format
   cannot be determined safely.
 
 For option 1, generate one streamlined definition with the retained tools. For
-option 2, generate the parent/shared definition plus one definition per
-specialist. Do not reuse `cluster_01`, `cluster_03`, or similar implementation
-identifiers as user-facing names.
+option 2, keep the shared/orchestration tools on the host's primary parent and
+generate exactly one definition file per specialist. Do not create a separate
+parent definition unless the selected host explicitly requires one. Do not
+reuse `cluster_01`, `cluster_03`, or similar implementation identifiers as
+user-facing names.
 
 When that provisional branch is selected, use its manifest membership to create
 the definitions; do not treat provisional status as a blocker. If the user
