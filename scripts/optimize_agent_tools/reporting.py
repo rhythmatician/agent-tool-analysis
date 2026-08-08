@@ -146,7 +146,7 @@ def render_markdown(report: dict[str, Any]) -> str:
                 [
                     "### Runtime recommendation policy",
                     "",
-                    f"- Preferred option: `{runtime_recommendation.get('preferred_option') or 'none'}`",
+                    f"- Preferred option: `{runtime_recommendation.get('preferred_option_label') or runtime_recommendation.get('preferred_option') or 'none'}`",
                     f"- Strength: `{runtime_recommendation.get('recommendation_strength', 'none')}`",
                     f"- Runner-up options: {', '.join(f'`{item}`' for item in runtime_recommendation.get('runner_up_options', [])) or 'none'}",
                     "- Why: " + "; ".join(runtime_recommendation.get("why", [])),

@@ -87,7 +87,7 @@ def test_normal_analysis_workflow_includes_generic_specialist_recommendation() -
     assert report["architecture_options"][0]["label"] == "Pruned single agent"
     assert report["architecture_options"][1]["status"] == "empirical_pareto"
     assert report["runtime_recommendation"]["preferred_option"] == "do_nothing"
-    assert report["runtime_recommendation"]["recommendation_strength"] == "supported"
+    assert report["runtime_recommendation"]["recommendation_strength"] == "provisional"
     assert report["architecture_manifest"]["baseline_architecture_id"] == (
         "pruned_flat_baseline"
     )

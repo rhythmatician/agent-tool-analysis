@@ -90,7 +90,11 @@ The result separates `preferred_option`, `recommendation_strength`,
 `runner_up_options`, rejection reasons, and policy thresholds. A materially
 useful option supported only by counterfactual or incomplete evidence is
 `provisional`; when no alternative clears the gate, the current runtime is
-returned as the supported conservative baseline.
+returned as the conservative no-change fallback. That fallback is only
+`supported` when current-runtime evidence is present; with unavailable runtime
+metrics it remains `provisional` and must not be read as proof that current
+exposure is optimal. The user-facing label is “no architecture change,” which
+does not imply “keep every configured tool.”
 
 A comparison may claim a measured token or quality delta only when both sides
 have compatible measured evidence. Estimates and counterfactuals remain
