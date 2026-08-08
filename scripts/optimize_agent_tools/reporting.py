@@ -121,7 +121,11 @@ def render_markdown(report: dict[str, Any]) -> str:
                 evidence = alternative.get("metric_evidence_status", {})
                 supported = alternative.get("supported")
                 supported_label = (
-                    "yes" if supported is True else "no" if supported is False else "unknown"
+                    "yes"
+                    if supported is True
+                    else "no"
+                    if supported is False
+                    else "unknown"
                 )
                 lines.append(
                     "| "
@@ -150,9 +154,12 @@ def render_markdown(report: dict[str, Any]) -> str:
                     f"- Strength: `{runtime_recommendation.get('recommendation_strength', 'none')}`",
                     f"- Runner-up options: {', '.join(f'`{item}`' for item in runtime_recommendation.get('runner_up_options', [])) or 'none'}",
                     "- Why: " + "; ".join(runtime_recommendation.get("why", [])),
-                    "- Thresholds: " + ", ".join(
+                    "- Thresholds: "
+                    + ", ".join(
                         f"{key}={value}"
-                        for key, value in runtime_recommendation.get("thresholds", {}).items()
+                        for key, value in runtime_recommendation.get(
+                            "thresholds", {}
+                        ).items()
                         if key != "complexity_order"
                     ),
                     "",

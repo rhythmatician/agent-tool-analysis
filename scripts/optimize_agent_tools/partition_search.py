@@ -55,7 +55,9 @@ class PartitionCandidate:
 
     @property
     def agent_count(self) -> int:
-        return len(self.agent_tools) + (1 if self.topology == "coordinator_children" else 0)
+        return len(self.agent_tools) + (
+            1 if self.topology == "coordinator_children" else 0
+        )
 
     @property
     def parent_tools(self) -> tuple[str, ...]:
@@ -336,11 +338,7 @@ def _screened_units(
             grouped.setdefault(next_group, set()).update(units[index])
         next_group += 1
 
-    screened = [
-        unit
-        for index, unit in enumerate(units)
-        if index not in unit_indexes
-    ]
+    screened = [unit for index, unit in enumerate(units) if index not in unit_indexes]
     screened.extend(frozenset(grouped[index]) for index in sorted(grouped))
     return tuple(sorted(screened, key=lambda unit: tuple(sorted(unit))))
 
@@ -487,14 +485,10 @@ def _candidate_metrics(
         count / session_count if session_count else 0.0 for count in activation_counts
     )
     before_cost = (
-        context_before / session_count
-        if session_count and context_complete
-        else None
+        context_before / session_count if session_count and context_complete else None
     )
     after = (
-        context_after / session_count
-        if session_count and context_complete
-        else None
+        context_after / session_count if session_count and context_complete else None
     )
     expected_handoffs = handoffs / session_count if session_count else 0.0
     expected_delegations = delegation_count / session_count if session_count else 0.0
@@ -639,10 +633,15 @@ def search_partitions(
     if screened_units != units:
         search_stages += ((units, "refined"),)
     for stage_units, stage_name in search_stages:
-        max_k = min(max_agents, len(stage_units)) if stage_units else (1 if retained else 0)
+        max_k = (
+            min(max_agents, len(stage_units)) if stage_units else (1 if retained else 0)
+        )
         for agent_count in range(1, max_k + 1):
             estimated = _stirling_second_kind(len(stage_units), agent_count)
-            if len(stage_units) <= max_exhaustive_units and estimated <= max_partition_candidates:
+            if (
+                len(stage_units) <= max_exhaustive_units
+                and estimated <= max_partition_candidates
+            ):
                 partitions = tuple(_set_partitions(stage_units, agent_count))
             else:
                 complete = False
@@ -669,7 +668,8 @@ def search_partitions(
                         continue
                     exclusive_tools = _partition_tools(exclusive_partition)
                     tools = tuple(
-                        tuple(sorted(set(group) | set(shared))) for group in exclusive_tools
+                        tuple(sorted(set(group) | set(shared)))
+                        for group in exclusive_tools
                     )
                     candidate = _candidate_metrics(
                         f"{stage_name}_k{agent_count:02d}_{index:04d}_s{shared_index:04d}",
@@ -743,7 +743,8 @@ def search_partitions(
                 )
             },
             "delegation": {
-                "enabled": len(candidate.agent_tools) > 1 and bool(candidate.control_tools),
+                "enabled": len(candidate.agent_tools) > 1
+                and bool(candidate.control_tools),
                 "topology": (
                     "parent -> "
                     + ", ".join(

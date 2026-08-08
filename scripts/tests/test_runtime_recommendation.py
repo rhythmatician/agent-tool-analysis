@@ -24,7 +24,9 @@ def row(
         "alternative_id": alternative_id,
         "supported": supported,
         "capability_coverage": coverage,
-        "coverage_reason": "missing required capabilities" if coverage is False else "ok",
+        "coverage_reason": "missing required capabilities"
+        if coverage is False
+        else "ok",
         "metric_evidence_status": {
             "tokens": evidence,
             "occupancy": evidence,
@@ -59,7 +61,11 @@ def test_policy_prefers_measured_simpler_option_over_weaker_modeled_gain() -> No
     result = recommend_runtime_alternatives(
         [
             row("do_nothing", tokens=(1000, 1000)),
-            row("runtime_dynamic_retrieval", tokens=(1000, 850), evidence="counterfactual"),
+            row(
+                "runtime_dynamic_retrieval",
+                tokens=(1000, 850),
+                evidence="counterfactual",
+            ),
             row("prune_only", tokens=(1000, 880), evidence="measured"),
         ]
     )
