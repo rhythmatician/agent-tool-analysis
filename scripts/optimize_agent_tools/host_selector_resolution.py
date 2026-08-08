@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Iterable, Mapping
+from typing import Callable, Iterable, Mapping
 
 _UNKNOWN_REFERENCE = re.compile(
-    r"(?:unknownExtensionReference|unknown extension reference)[^'\"]*['\"]([^'\"]+)['\"]",
+    r"(?:unknownExtensionReference|unknown extension reference|unknownSelector|unknown selector)[^'\"]*['\"]([^'\"]+)['\"]",
     re.IGNORECASE,
 )
 _VERIFIED_SOURCES = {
@@ -52,6 +52,32 @@ class SelectorResolution:
     @property
     def isolation_enforced(self) -> bool:
         return not self.unresolved and not self.ambiguous
+
+
+@dataclass(frozen=True)
+class GenerationValidationReport:
+    """Post-generation selector validation and bounded repair outcome."""
+
+    resolution: SelectorResolution
+    applied_selectors: Mapping[str, str]
+    skipped_overwrites: tuple[str, ...]
+    diagnostics: tuple[str, ...]
+    unresolved_selector_references: tuple[str, ...]
+    repair_attempted: bool
+    repair_applied: bool
+    generation_count: int
+
+    @property
+    def validation_passed(self) -> bool:
+        return not self.unresolved_selector_references
+
+    @property
+    def validation_status(self) -> str:
+        return "passed" if self.validation_passed else "failed"
+
+    @property
+    def unresolved_capabilities(self) -> tuple[str, ...]:
+        return self.resolution.unresolved
 
 
 def _is_trusted(item: SelectorEvidence) -> bool:
@@ -166,4 +192,71 @@ def bounded_selector_repair(
     )
     return SelectorResolution(
         selectors, unresolved, resolved_evidence, resolution.ambiguous
+    )
+
+
+def bounded_generation_selectors(
+    selectors: Mapping[str, str],
+    existing_selectors: Mapping[str, str] | None = None,
+    *,
+    allow_overwrite: bool = False,
+) -> tuple[dict[str, str], tuple[str, ...]]:
+    """Merge generated selectors into existing config without implicit overwrite."""
+    merged = dict(existing_selectors or {})
+    skipped_overwrites: list[str] = []
+    for capability, selector in sorted(selectors.items()):
+        if (
+            capability in merged
+            and merged[capability] != selector
+            and not allow_overwrite
+        ):
+            skipped_overwrites.append(capability)
+            continue
+        merged[capability] = selector
+    return merged, tuple(skipped_overwrites)
+
+
+def run_generation_validation(
+    resolution: SelectorResolution,
+    evidence: Iterable[SelectorEvidence],
+    generate_and_validate: Callable[[Mapping[str, str]], Iterable[str]],
+    *,
+    existing_selectors: Mapping[str, str] | None = None,
+    allow_overwrite: bool = False,
+) -> GenerationValidationReport:
+    """Generate once, optionally repair once from diagnostics, then revalidate."""
+    evidence_list = tuple(evidence)
+    applied_selectors, skipped_overwrites = bounded_generation_selectors(
+        resolution.selectors,
+        existing_selectors,
+        allow_overwrite=allow_overwrite,
+    )
+    diagnostics = tuple(generate_and_validate(applied_selectors))
+    unresolved_refs = unknown_extension_references(diagnostics)
+    generation_count = 1
+
+    repaired = bounded_selector_repair(resolution, diagnostics, evidence_list)
+    repair_applied = repaired.selectors != resolution.selectors
+    if repair_applied:
+        generation_count += 1
+        applied_selectors, skipped_after_repair = bounded_generation_selectors(
+            repaired.selectors,
+            existing_selectors,
+            allow_overwrite=allow_overwrite,
+        )
+        skipped_overwrites = tuple(
+            sorted(set(skipped_overwrites) | set(skipped_after_repair))
+        )
+        diagnostics = tuple(generate_and_validate(applied_selectors))
+        unresolved_refs = unknown_extension_references(diagnostics)
+
+    return GenerationValidationReport(
+        resolution=repaired if repair_applied else resolution,
+        applied_selectors=applied_selectors,
+        skipped_overwrites=skipped_overwrites,
+        diagnostics=diagnostics,
+        unresolved_selector_references=unresolved_refs,
+        repair_attempted=bool(unresolved_refs) or repair_applied,
+        repair_applied=repair_applied,
+        generation_count=generation_count,
     )

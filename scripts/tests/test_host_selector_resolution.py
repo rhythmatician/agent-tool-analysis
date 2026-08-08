@@ -1,9 +1,11 @@
 from optimize_agent_tools.host_selector_resolution import (
     CapabilityBinding,
     SelectorEvidence,
+    bounded_generation_selectors,
     bounded_selector_repair,
     resolve_host_selectors,
     resolve_telemetry_selectors,
+    run_generation_validation,
     unknown_extension_references,
 )
 
@@ -44,6 +46,12 @@ def test_unknown_reference_repair_is_exact_and_bounded() -> None:
     )
     assert repaired.isolation_enforced is True
     assert repaired.selectors["github.create_issue"] == "github.create_issue"
+
+
+def test_unknown_selector_references_are_detected() -> None:
+    assert unknown_extension_references(
+        ["host validator unknown selector: 'github.fetch_issue'"]
+    ) == ("github.fetch_issue",)
 
 
 def test_telemetry_identity_resolves_to_canonical_capability_and_selector() -> None:
@@ -111,3 +119,56 @@ def test_bounded_repair_cannot_resolve_a_capability_not_reported_as_unresolved()
     )
 
     assert repaired.selectors == {"github.fetch_issue": "github.fetch_issue"}
+
+
+def test_generation_runs_one_bounded_repair_pass_then_revalidates_once() -> None:
+    evidence = [
+        SelectorEvidence("github.fetch_issue", "github.fetch_issue", "mcp"),
+        SelectorEvidence("github.create_issue", "github.create_issue", "mcp"),
+    ]
+    initial = resolve_host_selectors(
+        ["github.fetch_issue", "github.create_issue"],
+        [evidence[0]],
+    )
+    attempts: list[dict[str, str]] = []
+
+    def generate_and_validate(selectors: dict[str, str]) -> tuple[str, ...]:
+        attempts.append(dict(selectors))
+        if "github.create_issue" in selectors.values():
+            return ()
+        return ("promptValidator.unknownExtensionReference: 'github.create_issue'",)
+
+    report = run_generation_validation(initial, evidence, generate_and_validate)
+
+    assert report.repair_applied is True
+    assert report.generation_count == 2
+    assert report.validation_status == "passed"
+    assert report.unresolved_selector_references == ()
+    assert report.applied_selectors == {
+        "github.fetch_issue": "github.fetch_issue",
+        "github.create_issue": "github.create_issue",
+    }
+    assert attempts == [
+        {"github.fetch_issue": "github.fetch_issue"},
+        {
+            "github.fetch_issue": "github.fetch_issue",
+            "github.create_issue": "github.create_issue",
+        },
+    ]
+
+
+def test_generation_respects_existing_config_without_explicit_overwrite() -> None:
+    merged, skipped = bounded_generation_selectors(
+        {"github.fetch_issue": "github.fetch_issue_v2"},
+        {"github.fetch_issue": "github.fetch_issue"},
+    )
+    assert merged == {"github.fetch_issue": "github.fetch_issue"}
+    assert skipped == ("github.fetch_issue",)
+
+    overwritten, overwritten_skipped = bounded_generation_selectors(
+        {"github.fetch_issue": "github.fetch_issue_v2"},
+        {"github.fetch_issue": "github.fetch_issue"},
+        allow_overwrite=True,
+    )
+    assert overwritten == {"github.fetch_issue": "github.fetch_issue_v2"}
+    assert overwritten_skipped == ()
