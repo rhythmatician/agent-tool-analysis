@@ -6,7 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
 
-from .telemetry_ingestion import Session, normalize_tool_name
+from .telemetry_ingestion import EvidenceSession, normalize_tool_name
 
 EXPOSURE_MODELS = ("observed_only", "all_runtime_tools", "provider_scoped")
 DECISION_EXPOSURE_MODELS = ("provider_scoped", "all_runtime_tools")
@@ -33,41 +33,41 @@ class BaselineExposure:
         return self.directly_observed_exposure | self.inferred_baseline_exposure
 
 
-def observed_runtime_tools(sessions: list[Session]) -> set[str]:
+def observed_runtime_tools(sessions: list[EvidenceSession]) -> set[str]:
     return {
         tool
         for session in sessions
-        if session.source == "codex"
-        for tool in session.directly_observed_exposure | session.tool_set
+        if session.is_runtime("codex")
+        for tool in session.direct_exposure | session.tool_set
     }
 
 
-def provider_families_by_tool(sessions: list[Session]) -> dict[str, set[str]]:
+def provider_families_by_tool(sessions: list[EvidenceSession]) -> dict[str, set[str]]:
     families: dict[str, set[str]] = defaultdict(set)
     for session in sessions:
-        for provider, tools in session.provider_tools.items():
+        for provider, tools in session.provider_tool_membership.items():
             for tool in tools:
                 families[tool].add(provider)
     return dict(families)
 
 
 def baseline_exposure_state(
-    session: Session,
+    session: EvidenceSession,
     exposure_model: str,
     runtime_tools: set[str],
     provider_by_tool: dict[str, set[str]],
 ) -> BaselineExposure:
     if exposure_model not in EXPOSURE_MODELS:
         raise ValueError(f"Unknown exposure model: {exposure_model}")
-    directly_observed = frozenset(session.directly_observed_exposure)
+    directly_observed = session.direct_exposure
     inferred: set[str] = set()
-    if exposure_model == "all_runtime_tools" and session.source == "codex":
+    if exposure_model == "all_runtime_tools" and session.is_runtime("codex"):
         inferred.update(runtime_tools)
-    elif exposure_model == "provider_scoped" and session.source == "codex":
+    elif exposure_model == "provider_scoped" and session.is_runtime("codex"):
         inferred.update(
             tool
             for tool in provider_by_tool
-            if provider_by_tool.get(tool, set()) & session.provider_availability
+            if provider_by_tool.get(tool, set()) & session.available_providers
         )
     return BaselineExposure(
         directly_observed_exposure=directly_observed,
@@ -77,7 +77,7 @@ def baseline_exposure_state(
 
 
 def baseline_exposure_states(
-    sessions: list[Session], exposure_model: str
+    sessions: list[EvidenceSession], exposure_model: str
 ) -> dict[str, BaselineExposure]:
     runtime_tools = observed_runtime_tools(sessions)
     provider_by_tool = provider_families_by_tool(sessions)
@@ -89,7 +89,7 @@ def baseline_exposure_states(
     }
 
 
-def exposure_model_summary(sessions: list[Session]) -> list[dict[str, Any]]:
+def exposure_model_summary(sessions: list[EvidenceSession]) -> list[dict[str, Any]]:
     runtime_tools = observed_runtime_tools(sessions)
     provider_by_tool = provider_families_by_tool(sessions)
     rows = []
@@ -115,7 +115,7 @@ def exposure_model_summary(sessions: list[Session]) -> list[dict[str, Any]]:
                     for s in sessions
                 ),
                 "sessions_with_provider_availability": sum(
-                    bool(s.provider_availability) for s in sessions
+                    bool(s.available_providers) for s in sessions
                 ),
             }
         )
@@ -123,15 +123,15 @@ def exposure_model_summary(sessions: list[Session]) -> list[dict[str, Any]]:
 
 
 def provider_scoped_session_diagnostics(
-    sessions: list[Session],
+    sessions: list[EvidenceSession],
 ) -> list[dict[str, Any]]:
     states = baseline_exposure_states(sessions, "provider_scoped")
     return [
         {
             "session_id": session.session_id,
-            "source": session.source,
-            "provider_availability_observed": bool(session.provider_availability),
-            "providers_available": sorted(session.provider_availability),
+            "source": session.runtime,
+            "provider_availability_observed": bool(session.available_providers),
+            "providers_available": sorted(session.available_providers),
             "inferred_runtime_tools": sorted(
                 states[session.session_id].inferred_baseline_exposure
             ),
@@ -144,7 +144,7 @@ def provider_scoped_session_diagnostics(
     ]
 
 
-def dynamic_tool_group_inventory(sessions: list[Session]) -> list[dict[str, Any]]:
+def dynamic_tool_group_inventory(sessions: list[EvidenceSession]) -> list[dict[str, Any]]:
     return [
         {
             "session_id": session.session_id,
@@ -166,7 +166,7 @@ def _github_like(value: str | None) -> bool:
     return isinstance(value, str) and "github" in value.casefold()
 
 
-def provider_availability_diagnostics(sessions: list[Session]) -> dict[str, Any]:
+def provider_availability_diagnostics(sessions: list[EvidenceSession]) -> dict[str, Any]:
     """Compare runtime calls with definitions in explicit provider groups."""
     providers: dict[str, dict[str, Any]] = defaultdict(
         lambda: {"groups": 0, "sessions": set(), "tools": set()}
@@ -292,28 +292,32 @@ def provider_availability_diagnostics(sessions: list[Session]) -> dict[str, Any]
     }
 
 
-def exposure_consistency(sessions: list[Session]) -> dict[str, int]:
+def exposure_consistency(sessions: list[EvidenceSession]) -> dict[str, int]:
     calls_without_direct_exposure = sum(
         1
         for session in sessions
         for tool in session.actual_calls
-        if tool not in session.directly_observed_exposure
+        if tool not in session.direct_exposure
     )
     return {
-        "sessions_with_direct_exposure": sum(bool(s.exposed_tools) for s in sessions),
-        "sessions_without_direct_exposure": sum(not s.exposed_tools for s in sessions),
+        "sessions_with_direct_exposure": sum(
+            s.has_direct_exposure for s in sessions
+        ),
+        "sessions_without_direct_exposure": sum(
+            not s.has_direct_exposure for s in sessions
+        ),
         "called_tools_without_direct_exposure": calls_without_direct_exposure,
     }
 
 
-def exposure_evidence_summary(sessions: list[Session]) -> dict[str, Any]:
+def exposure_evidence_summary(sessions: list[EvidenceSession]) -> dict[str, Any]:
     """Report whether direct exposure can support an empirical frontier."""
-    call_bearing = [session for session in sessions if session.calls]
+    call_bearing = [session for session in sessions if session.called_tools]
     sessions_missing_exposure = [
-        session for session in call_bearing if not session.directly_observed_exposure
+        session for session in call_bearing if not session.has_direct_exposure
     ]
     calls_missing_exposure = sum(
-        len(session.calls) for session in sessions_missing_exposure
+        len(session.called_tools) for session in sessions_missing_exposure
     )
     sufficient = not sessions_missing_exposure
     return {
@@ -322,7 +326,7 @@ def exposure_evidence_summary(sessions: list[Session]) -> dict[str, Any]:
         "sessions_total": len(sessions),
         "call_bearing_sessions": len(call_bearing),
         "sessions_with_direct_exposure": sum(
-            bool(session.directly_observed_exposure) for session in sessions
+            session.has_direct_exposure for session in sessions
         ),
         "call_bearing_sessions_without_direct_exposure": len(sessions_missing_exposure),
         "calls_without_direct_exposure": calls_missing_exposure,
