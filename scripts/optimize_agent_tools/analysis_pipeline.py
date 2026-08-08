@@ -5,8 +5,8 @@ from __future__ import annotations
 import itertools
 import math
 import statistics
-from copy import deepcopy
 from collections import Counter, defaultdict
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Mapping, TypeVar
 
@@ -46,11 +46,9 @@ from .freshness import (
 from .nmf_screening import NMFConfig, run_nmf_screening
 from .replay_harness import BASELINE_ARCHITECTURE_ID
 from .telemetry_ingestion import (
-    CONTROL_PLANE_TOOLS,
     Session,
     classify_tool_roles,
     normalize_tool_name,
-    tool_role,
 )
 from .tool_definition_registry import (
     DefinitionRecord,
@@ -71,6 +69,8 @@ KNOWN_DEPENDENCIES = {
 ESTIMATION_BASIS = "global distribution of resolved definition tokens (25th percentile / median / 75th percentile)"
 DECISION_GITHUB_EXPOSURE_RATES = (0.25, 0.50, 0.75, 1.0)
 DECISION_DELEGATION_OVERHEADS = (0, 100, 250, 500)
+MIN_PROVISIONAL_AGENT_TOOLS = 2
+MIN_PROVISIONAL_AGENT_SHARE = 0.25
 _StageValue = TypeVar("_StageValue")
 
 
@@ -1456,7 +1456,7 @@ def classify_specialist_recommendation(
         maximum = float(maximum_value)
         if minimum < 0 < maximum:
             contradictory = True
-        if minimum >= 0 and maximum > 0:
+        if minimum > 0 and maximum >= minimum:
             positive_variants.append(variant)
 
     if not contradictory and len(agents) >= 2 and len(positive_variants) >= 2:
@@ -1503,12 +1503,7 @@ def materialize_provisional_architecture(
     dependencies: Mapping[str, Iterable[str]] | None = None,
     search_candidates: Iterable[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
-    """Materialize the strongest directional two-agent hypothesis.
-
-    This artifact is deliberately not a partition-search finalist. It is a
-    concrete, replayable hypothesis assembled from structural clusters and
-    sensitivity results while their costs or exposure remain incomplete.
-    """
+    """Materialize a provisional split only from concrete partition evidence."""
 
     if recommendation.get("status") != "provisional":
         return None
@@ -1530,6 +1525,10 @@ def materialize_provisional_architecture(
                 str(candidate.get("architecture_id", "")),
             ),
         )
+        if not _is_coherent_provisional_candidate(
+            selected_candidate, search_provenance
+        ):
+            return None
         raw_agents = selected_candidate.get("agents", {})
         if not raw_agents and selected_candidate.get("agent_tools"):
             shared = set(selected_candidate.get("shared_tools", ()))
@@ -1585,111 +1584,50 @@ def materialize_provisional_architecture(
             },
         }
 
-    agents = list(candidate_agents)
-    variants = list(directional_variants)
-    by_id = {str(agent.get("candidate_id")): agent for agent in agents}
+    # Structural clusters and sensitivity ranges alone cannot provide a
+    # coherent membership contract. A provisional option must come from the
+    # same concrete partition evidence used for replayable assignments.
+    return None
 
-    def score(agent: Mapping[str, Any]) -> tuple[float, float, str]:
-        candidate_id = str(agent.get("candidate_id"))
-        matching = [
-            variant
-            for variant in variants
-            if str(variant.get("variant_id", "")).split("_boundary_pruned", 1)[0]
-            == candidate_id
-        ]
-        maximum_reductions: list[float] = []
-        for variant in matching:
-            maximum_reduction = (variant.get("sensitivity") or {}).get(
-                "max_mid_reduction"
-            )
-            if isinstance(maximum_reduction, (int, float)):
-                maximum_reductions.append(float(maximum_reduction))
-        maximum = max(
-            maximum_reductions,
-            default=float("-inf"),
-        )
-        return (
-            maximum,
-            float(agent.get("internal_affinity") or 0.0),
-            candidate_id,
-        )
 
-    selected = sorted(by_id.values(), key=score, reverse=True)[:2]
-    if len(selected) != 2:
-        return None
+def _is_coherent_provisional_candidate(
+    candidate: Mapping[str, Any], search_provenance: Mapping[str, Any]
+) -> bool:
+    """Require concrete evidence before exposing a provisional split."""
 
-    retained = set(retained_tools)
-    global_set = set(global_tools)
-    dependency_map = dependencies or KNOWN_DEPENDENCIES
-    specialist_tools = [
-        sorted((set(agent.get("tools", ())) & retained) - global_set)
-        for agent in selected
-    ]
-    for tools in specialist_tools:
-        pending = list(tools)
-        while pending:
-            tool = pending.pop()
-            for dependency in dependency_map.get(tool, ()):
-                if (
-                    dependency in retained
-                    and dependency not in global_set
-                    and dependency not in tools
-                ):
-                    tools.append(dependency)
-                    pending.append(dependency)
-        tools.sort()
-    specialist_tools = [tools for tools in specialist_tools if tools]
-    if len(specialist_tools) != 2:
-        return None
-    shared = retained & (global_set | set(CONTROL_PLANE_TOOLS))
-    assigned = set().union(*map(set, specialist_tools)) | shared
-    # A peer architecture cannot strand retained capabilities on an implicit
-    # parent. Preserve capability coverage by assigning any unclustered tools
-    # to the first peer; the partition search remains the source of truth for
-    # measured assignments.
-    unassigned = sorted(retained - assigned)
-    if unassigned:
-        specialist_tools[0].extend(unassigned)
-        specialist_tools[0].sort()
-    architecture_id = "provisional_two_agents"
-    assumptions = [
-        "tool-family separation is inferred from structural clusters, not measured runtime routing",
-        "sensitivity ranges are directional because exposure or definition costs are incomplete",
-        "the pruned flat baseline retains all historically required tools and known dependencies",
-        "agent names, responsibilities, activation paths, and quality preservation remain hypotheses",
-    ]
-    provenance = {
-        "source": "directional_structure_and_sensitivity",
-        "recommendation_status": recommendation.get("status"),
-        "direction": recommendation.get("direction"),
-        "candidate_agent_ids": [str(agent.get("candidate_id")) for agent in selected],
-        "directional_variant_ids": [
-            str(variant.get("variant_id"))
-            for variant in variants
-            if str(variant.get("variant_id", "")).split("_boundary_pruned", 1)[0]
-            in {str(agent.get("candidate_id")) for agent in selected}
-        ],
-        "search_provenance": dict(search_provenance),
-    }
-    return {
-        "architecture_id": architecture_id,
-        "topology": "peer",
-        "agent_count": 2,
-        "shared_tools": {f"agent_{index:02d}": sorted(shared) for index in range(1, 3)},
-        "control_tools": sorted(shared & set(CONTROL_PLANE_TOOLS)),
-        "agents": {
-            f"agent_{index:02d}": {
-                "exclusive_tools": sorted(set(tools) - shared),
-                "shared_tools": sorted(shared),
-                "tools": sorted(set(tools) | shared),
-            }
-            for index, tools in enumerate(specialist_tools, start=1)
-        },
-        "provisional": True,
-        "directional_only": True,
-        "assumptions": assumptions,
-        "provenance": provenance,
-    }
+    if not candidate.get("is_cost_complete"):
+        return False
+    if not candidate.get("is_pareto_optimal"):
+        return False
+    if candidate.get("pareto_scope") != "global":
+        return False
+    if not candidate.get("dependency_closed"):
+        return False
+    if not search_provenance.get("search_complete"):
+        return False
+    if search_provenance.get("pareto_scope") != "global":
+        return False
+
+    exclusive = candidate.get("exclusive_tools", ())
+    agent_tools = candidate.get("agent_tools", ())
+    shared = set(candidate.get("shared_tools", ()))
+    if (
+        not isinstance(exclusive, (list, tuple))
+        or not isinstance(agent_tools, (list, tuple))
+        or len(exclusive) != 2
+        or len(agent_tools) != 2
+    ):
+        return False
+    if any(
+        set(exclusive[index]) | shared != set(agent_tools[index])
+        for index in range(2)
+    ):
+        return False
+    sizes = [len(tools) for tools in exclusive]
+    total = sum(sizes)
+    if total == 0 or min(sizes, default=0) < MIN_PROVISIONAL_AGENT_TOOLS:
+        return False
+    return min(sizes) / total >= MIN_PROVISIONAL_AGENT_SHARE
 
 
 def _semantic_agent_details(
