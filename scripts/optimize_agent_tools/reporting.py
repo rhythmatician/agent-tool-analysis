@@ -140,6 +140,24 @@ def render_markdown(report: dict[str, Any]) -> str:
                     + " |"
                 )
             lines.append("")
+        runtime_recommendation = report.get("runtime_recommendation")
+        if runtime_recommendation:
+            lines.extend(
+                [
+                    "### Runtime recommendation policy",
+                    "",
+                    f"- Preferred option: `{runtime_recommendation.get('preferred_option') or 'none'}`",
+                    f"- Strength: `{runtime_recommendation.get('recommendation_strength', 'none')}`",
+                    f"- Runner-up options: {', '.join(f'`{item}`' for item in runtime_recommendation.get('runner_up_options', [])) or 'none'}",
+                    "- Why: " + "; ".join(runtime_recommendation.get("why", [])),
+                    "- Thresholds: " + ", ".join(
+                        f"{key}={value}"
+                        for key, value in runtime_recommendation.get("thresholds", {}).items()
+                        if key != "complexity_order"
+                    ),
+                    "",
+                ]
+            )
         options = report.get("architecture_options", [])
         if options:
             lines.extend(

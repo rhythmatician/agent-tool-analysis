@@ -108,3 +108,28 @@ def test_report_marks_unsupported_and_unmeasured_alternatives_explicitly() -> No
     assert dynamic["supported"] is None
     assert dynamic["metric_evidence_status"]["tokens"] == "unavailable"
     assert report[0]["alternative_id"] == "do_nothing"
+
+
+def test_concrete_architecture_reports_missing_historical_capabilities() -> None:
+    plans = build_alternative_plans(
+        manifest={
+            "baseline_architecture_id": "pruned_flat_baseline",
+            "historical_tool_capability_tools": ["exec", "github.fetch_issue"],
+            "architectures": [
+                {
+                    "architecture_id": "pruned_flat_baseline",
+                    "topology": "flat",
+                    "parent_tools": ["exec", "github.fetch_issue"],
+                },
+                {
+                    "architecture_id": "peer_candidate",
+                    "topology": "peer",
+                    "agents": {"one": {"tools": ["exec"]}},
+                },
+            ],
+        }
+    )
+
+    peer = next(plan for plan in plans if plan.alternative_id == "peer_specialists")
+    assert peer.capability_coverage is False
+    assert "github.fetch_issue" in peer.coverage_reason

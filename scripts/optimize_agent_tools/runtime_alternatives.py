@@ -45,6 +45,8 @@ class AlternativePlan:
     support_reason: str
     runtime_requirements: tuple[str, ...] = ()
     assumptions: tuple[str, ...] = ()
+    capability_coverage: bool | None = None
+    coverage_reason: str = "capability coverage was not established"
 
     def __post_init__(self) -> None:
         if self.alternative_id not in ALTERNATIVE_IDS:
@@ -115,6 +117,34 @@ def build_alternative_plans(
     ]
     peer_ids = topology_ids["peer"]
     coordinator_ids = topology_ids["coordinator_children"]
+    historical = set(manifest.get("historical_tool_capability_tools", ()))
+
+    def architecture_coverage(
+        architecture_id: str | None,
+    ) -> tuple[bool | None, str]:
+        if not architecture_id or not historical:
+            return None, "historical capability surface was not supplied"
+        architecture = next(
+            (
+                item
+                for item in manifest.get("architectures", ())
+                if isinstance(item, Mapping)
+                and str(item.get("architecture_id")) == architecture_id
+            ),
+            None,
+        )
+        if architecture is None:
+            return None, "architecture membership was not supplied"
+        available = set(architecture.get("parent_tools", ()))
+        for agent in (architecture.get("agents", {}) or {}).values():
+            if isinstance(agent, Mapping):
+                available.update(agent.get("tools", ()))
+            else:
+                available.update(agent)
+        missing = sorted(historical - available)
+        if missing:
+            return False, "missing required capabilities: " + ", ".join(missing)
+        return True, "all historical capabilities are retained"
 
     def optional_plan(
         alternative_id: str,
@@ -124,14 +154,18 @@ def build_alternative_plans(
         reason: str,
         requirements: tuple[str, ...] = (),
     ) -> AlternativePlan:
+        architecture_id = architecture_ids[0] if architecture_ids else None
+        coverage, coverage_reason = architecture_coverage(architecture_id)
         return AlternativePlan(
             alternative_id,
-            architecture_ids[0] if architecture_ids else None,
+            architecture_id,
             topology,
             loading_policy,
             True if architecture_ids else False,
             reason if architecture_ids else f"{reason}; no concrete architecture is available",
             requirements,
+            capability_coverage=coverage if architecture_ids else None,
+            coverage_reason=coverage_reason,
         )
 
     return (
@@ -143,6 +177,8 @@ def build_alternative_plans(
             True,
             "current runtime configuration is always represented",
             assumptions=("current configuration is the comparison baseline",),
+            capability_coverage=True,
+            coverage_reason="current configuration is the required capability baseline",
         ),
         AlternativePlan(
             "prune_only",
@@ -151,6 +187,8 @@ def build_alternative_plans(
             "static_pruned",
             True,
             "dependency-closed pruned flat baseline is available",
+            capability_coverage=architecture_coverage(baseline_id)[0],
+            coverage_reason=architecture_coverage(baseline_id)[1],
         ),
         optional_plan(
             "streamlined_static",
@@ -174,6 +212,7 @@ def build_alternative_plans(
                 else "runtime loading/deferred-selection support is not established"
             ),
             ("runtime selection telemetry", "deferred definition support"),
+            coverage_reason="dynamic retrieval capability coverage requires runtime evidence",
         ),
         optional_plan(
             "peer_specialists",
@@ -203,6 +242,7 @@ def build_alternative_plans(
                 else "static and dynamic composition is not established"
             ),
             ("static assignment", "runtime retrieval", "routing"),
+            coverage_reason="hybrid capability coverage requires static and runtime evidence",
         ),
     )
 

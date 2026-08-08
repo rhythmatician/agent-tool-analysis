@@ -47,6 +47,10 @@ from .nmf_screening import NMFConfig, run_nmf_screening
 from .replay_harness import BASELINE_ARCHITECTURE_ID
 from .runtime_alternatives import build_runtime_alternatives_report
 from .runtime_metrics import RuntimeMetrics
+from .runtime_recommendation import (
+    RecommendationThresholds,
+    recommend_runtime_alternatives,
+)
 from .telemetry_ingestion import (
     Session,
     classify_tool_roles,
@@ -1884,6 +1888,7 @@ def _run_analysis(
     freshness_config: FreshnessConfig | None = None,
     exposure_model: str = "observed_only",
     runtime_metrics_by_alternative: Mapping[str, RuntimeMetrics] | None = None,
+    runtime_recommendation_thresholds: RecommendationThresholds | None = None,
 ) -> AnalysisWorkflowResult:
     if max_agents < 1:
         raise ValueError("max_agents must be at least 1.")
@@ -2219,6 +2224,10 @@ def _run_analysis(
         manifest=manifest,
         metrics_by_alternative=runtime_metrics_by_alternative,
     )
+    runtime_recommendation = recommend_runtime_alternatives(
+        runtime_alternatives,
+        thresholds=runtime_recommendation_thresholds,
+    )
     option_ids = [option["architecture_id"] for option in architecture_options]
     multiple_options = (
         len(option_ids) > 1 and specialist_classification["status"] != "proven"
@@ -2290,6 +2299,7 @@ def _run_analysis(
         "architecture_manifest": manifest,
         "architecture_options": architecture_options,
         "runtime_alternatives": runtime_alternatives,
+        "runtime_recommendation": runtime_recommendation,
         "partition_search": partition_result.report,
         "topology_discovery": topology_discovery,
         "specialist_recommendation": {
@@ -2384,6 +2394,7 @@ def analyze(
     freshness_config: FreshnessConfig | None = None,
     exposure_model: str = "observed_only",
     runtime_metrics_by_alternative: Mapping[str, RuntimeMetrics] | None = None,
+    runtime_recommendation_thresholds: RecommendationThresholds | None = None,
 ) -> dict[str, Any]:
     """Run the analysis workflow and return its stable serialized report."""
 
@@ -2410,5 +2421,6 @@ def analyze(
         freshness_config=freshness_config,
         exposure_model=exposure_model,
         runtime_metrics_by_alternative=runtime_metrics_by_alternative,
+        runtime_recommendation_thresholds=runtime_recommendation_thresholds,
     )
     return result.serialize()
