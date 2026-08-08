@@ -216,7 +216,25 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"- Strong communities: {'; '.join(format_tools(item.get('tools', [])) for item in hints.get('strong_communities', [])) or 'none'}",
                 f"- Ambiguous/cross-loading tools: {format_tools(hints.get('ambiguous_tools', []))}",
                 f"- Shared candidates: {format_tools(hints.get('shared_candidates', []))}",
-                f"- Search units: {len(hints.get('search_units', []))} soft units; partition search remains authoritative and currently uses them for ordering only",
+                f"- Search units: {len(hints.get('search_units', []))} soft units; dependencies remain hard locks and soft units are refined later",
+                "",
+            ]
+        )
+
+    partition_search = report.get("partition_search", {}).get("search")
+    if partition_search:
+        stage_summary = ", ".join(
+            f"{stage['name']} ({stage['effective_search_units']})"
+            for stage in partition_search.get("stages", [])
+        )
+        lines.extend(
+            [
+                "## Staged partition search",
+                "",
+                f"- Effective units before screening: {partition_search.get('search_units_before_screening', 0)}",
+                f"- Effective units after NMF screening/freeze: {partition_search.get('search_units_after_screening', 0)}",
+                f"- Effective units after refinement: {partition_search.get('search_units_after_refinement', 0)}",
+                f"- Search stages: {stage_summary}",
                 "",
             ]
         )

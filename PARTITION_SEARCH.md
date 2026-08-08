@@ -19,10 +19,15 @@ The pure `search_partitions()` API accepts:
 
 Dependencies are expanded transitively and dependency-connected tools are kept
 in the same partition unit. Explicit global tools remain on the parent surface.
+The search is staged: dependency units are the hard-lock baseline, strong NMF
+communities combine those units into breakable soft units for the initial search,
+and refinement searches the original dependency units again so a soft grouping
+cannot prevent a better Pareto candidate from being found.
 For small graphs the search exhaustively enumerates canonical set partitions for
-every `k` from `1` through `max_agents`. Larger graphs use a deterministic
-affinity-guided bounded search and report `search_complete: false`; this keeps
-the tool bounded without presenting a heuristic frontier as exhaustive.
+every `k` from `1` through `max_agents` in both the frozen and refinement stages.
+Larger graphs use a deterministic affinity-guided bounded search and report
+`search_complete: false`; this keeps the tool bounded without presenting a
+heuristic frontier as exhaustive.
 
 ## Measurements
 
@@ -47,6 +52,10 @@ plus one architecture per Pareto candidate. Agent IDs are generated as
 manifest can be passed directly to `replay_architectures.py`. Replay still owns
 quality evaluation and the strict benchmark gate; partition search only proposes
 and measures candidate surfaces.
+
+The report's `search` section records effective search-unit counts before
+screening, after NMF freeze, and after refinement, plus the ordered stages
+`SCREEN`, `NMF`, `FREEZE`, `SEARCH`, and `REFINE`.
 
 The normal command writes the candidate metrics into
 `agent_tool_analysis/agent_tool_analysis.json` and writes the manifest to
