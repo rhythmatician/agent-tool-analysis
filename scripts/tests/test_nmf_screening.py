@@ -42,6 +42,30 @@ def test_control_plane_is_excluded_but_statistics_are_retained() -> None:
     assert result.control_plane["tools"][0]["tool"] == "send_message"
 
 
+def test_result_exposes_binary_matrix_in_structured_output_only() -> None:
+    sessions = _sessions()
+    roles = classify_tool_roles(
+        {tool for session in sessions for tool in session.tool_set}
+    )
+
+    result = run_nmf_screening(
+        sessions,
+        ["send_message", "beta", "alpha"],
+        roles,
+        config=NMFConfig(max_factors=1, seeds=(0,), iterations=20),
+    )
+
+    assert result.matrix["mode"] == "binary_session_usage"
+    assert result.matrix["session_ids"] == ["a1", "a2", "b1", "b2"]
+    assert result.matrix["tools"] == ["alpha", "beta"]
+    assert result.matrix["values"] == [
+        [1.0, 0.0],
+        [1.0, 0.0],
+        [0.0, 1.0],
+        [0.0, 1.0],
+    ]
+
+
 def test_runtime_infrastructure_is_counted_separately_from_control_plane() -> None:
     sessions = _sessions()
     roles = classify_tool_roles(
