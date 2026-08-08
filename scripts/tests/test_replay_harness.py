@@ -392,6 +392,7 @@ def test_report_evaluates_every_manifest_architecture_without_hard_coded_ids() -
                     "unnecessary_agent_activation": False,
                     "total_input_tokens": 20,
                     "tool_definition_context_tokens": 100,
+                    "cached_input_tokens": 5,
                     "delegation_tokens": 0,
                     "inter_agent_communication_tokens": 0,
                     "turns": 2,
@@ -411,6 +412,7 @@ def test_report_evaluates_every_manifest_architecture_without_hard_coded_ids() -
                     "unnecessary_agent_activation": False,
                     "total_input_tokens": 20,
                     "tool_definition_context_tokens": 80,
+                    "cached_input_tokens": 5,
                     "delegation_tokens": 6,
                     "inter_agent_communication_tokens": 5,
                     "turns": 2,
@@ -431,6 +433,12 @@ def test_report_evaluates_every_manifest_architecture_without_hard_coded_ids() -
     assert report["architectures"]["two_agents"]["agent_count"] == 3
     assert report["architectures"]["two_agents"]["inter_agent_handoffs"] == 1
     assert report["architectures"]["two_agents"]["orchestration_tokens"] == 11
+    runtime_metrics = report["architectures"]["two_agents"]["runtime_metrics"]
+    assert runtime_metrics["tokens"]["uncached_input"]["value"] == 15
+    assert runtime_metrics["tokens"]["uncached_input"]["evidence"]["status"] == (
+        "inferred"
+    )
+    assert runtime_metrics["coordination"]["delegation_tokens"]["value"] == 6
 
 
 def test_report_rejects_baseline_drift_against_analysis_artifact() -> None:

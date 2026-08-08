@@ -51,6 +51,13 @@ always includes the dependency-closed `pruned_flat_baseline`, and adds the
   strongest concrete empirical finalist(s) or provisional peer-agent hypothesis
 when those are coherent.
 
+Runtime comparisons use the host-neutral contract in `RUNTIME_METRICS.md`.
+Keep configured versus loaded definitions, cached versus uncached versus billed
+input, schema versus task/context occupancy, selection quality, and coordination
+overhead separate. Preserve evidence status and retain the pruned flat
+baseline as a valid “do nothing” recommendation when no supported benefit is
+shown.
+
 ## Host targeting
 
 Before generating definitions after an architecture choice, resolve the

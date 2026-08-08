@@ -32,6 +32,13 @@ Each recorded observation reports the executor's actual `agent_activation_path`,
 - explicit `delegation_tokens` and `inter_agent_communication_tokens`;
 - turns and wall-clock time.
 
+Replay observations can be adapted with `from_replay_observation()` from
+`optimize_agent_tools.runtime_metrics`. The adapter preserves the distinction
+between configured/loaded definitions, input/cache/billing tokens, schema and
+task/context occupancy, tool selection, and coordination. Missing executor
+fields remain explicitly unavailable. See `RUNTIME_METRICS.md` for the v0.3
+evidence statuses and comparison rules.
+
 Historical tool capability coverage is calculated from the manifest's available tool surfaces. Observed replay capability coverage is calculated from the executor observations. They are reported separately and are not interchangeable.
 
 ## Candidate success gate

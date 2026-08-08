@@ -17,6 +17,7 @@ from optimize_agent_tools.replay_harness import (
     replay_recorded_observations,
     serialize_architecture_manifest,
 )
+from optimize_agent_tools.runtime_metrics import from_replay_aggregate
 
 
 def parse_args() -> argparse.Namespace:
@@ -152,6 +153,7 @@ def _aggregate_report(result: Any, architecture: Any) -> dict[str, Any]:
         "cached_input_tokens": aggregate.cached_input_tokens,
         "tool_selection_failures": aggregate.tool_selection_failures,
         "tool_selection_failure_rate": aggregate.tool_selection_failure_rate,
+        "runtime_metrics": from_replay_aggregate(aggregate).to_record(),
     }
 
 

@@ -30,6 +30,13 @@ Each run records:
 - task success, quality score, and wall-clock latency;
 - runtime/model identity and task identity.
 
+The JSON report also includes a `runtime_metrics` record for each run. This is
+the host-neutral v0.3 contract described in `RUNTIME_METRICS.md`: configured,
+loaded, and deferred definitions; cached, uncached, and billed input; schema
+versus task/context occupancy; selection; coordination; outcomes; and evidence
+status for every value. Fields that this controlled surface cannot observe are
+`unavailable`, not zero or an estimate.
+
 The report stores only these structural measurements. It does not store prompts,
 tool arguments, tool results, schemas, or model outputs.
 

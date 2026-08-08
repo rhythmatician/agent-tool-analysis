@@ -51,6 +51,11 @@ The Pareto dimensions are context cost after overhead, maximum agent definition
 cost, cross-agent session frequency, handoff count, and agent count. Every
 non-dominated candidate is retained.
 
+These are architecture estimates, not runtime measurements. Do not combine
+them with billed input, cached/uncached input, output, tool-selection quality,
+or coordination evidence without preserving the evidence status. The shared
+v0.3 result vocabulary and adapter rules are in `RUNTIME_METRICS.md`.
+
 ## Manifest output
 
 The result includes a generic manifest with the frozen `pruned_flat_baseline`
