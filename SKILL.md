@@ -23,12 +23,15 @@ The command discovers supported local telemetry using its defaults and writes:
 - `agent_tool_analysis/agent_tool_analysis.md` — the report to read first;
 - `agent_tool_analysis/architecture_manifest.json` — candidate architectures for optional replay validation.
 
-Read the Markdown report first. It is the compact human-facing recommendation
-artifact. Do not load the full JSON report unless exact fields are needed; when
-they are needed, read only `specialist_recommendation`, `candidate_agents`,
-`clusters`, and the relevant `partition_search` entries. Read the architecture
-manifest only for replay validation or to inspect a selected candidate's exact
-parent/agent memberships.
+Read the Markdown report first. It is the compact evidence artifact, not a
+script for the normal chat response. Interpret it through the default
+user-facing response policy below rather than copying its diagnostic headings,
+field names, or anonymous IDs. Do not load the full JSON report unless exact
+fields are needed; when they are needed, read only
+`specialist_recommendation`, `candidate_agents`, `clusters`, and the relevant
+`partition_search` entries. Read the architecture manifest only for replay
+validation or after a user selects an option and its exact parent/agent
+memberships are needed.
 
 Then classify the recommendation into exactly one strength level, with
 offline replay validation recorded separately:
@@ -46,27 +49,63 @@ offline replay validation recorded separately:
 The normal command emits concrete `architecture_options` for the user. It
 always includes the dependency-closed `pruned_flat_baseline`, and adds the
 strongest concrete empirical finalist(s) or provisional specialist hypothesis
-when those are coherent. When evidence is inconclusive, present the top two
-or three options with their tool memberships, shared tools, semantic role
-hypotheses, tradeoffs, and confidence; do not silently choose one.
+when those are coherent.
 
-Offline replay is optional advanced validation, not part of the normal happy
-path. It runs only when the user supplies both `--offline-replay-input` and an
-explicit `--offline-replay-candidate`. The bundle must explicitly declare
-`mode: recorded_observations`, `executor: recorded_observations`, deterministic
-execution, side-effect-free behavior, an exact architecture-manifest match,
-complete tasks, and complete observations for the frozen baseline and selected
-option. A passing bundle records `replay_validated`; a failing bundle records
-`replay_rejected`. Live model calls, shell commands, network/API actions,
-external writes, and live A/B experiments are never launched automatically.
+## Default user-facing response
+
+The normal response is a decision aid, not an implementation or telemetry
+diagnostic. Keep it short and lead with a heading such as `## Recommended
+setup`. Translate the evidence into plain language and present concrete,
+numbered options whenever more than one architecture is reasonable. The
+default response should:
+
+- state how many tools are retained and how many appear safe to exclude, using
+  the option data rather than implying that anything has already been changed;
+- describe each option's simplicity, delegation, context, and coordination
+  trade-offs;
+- give every specialist a useful provisional name and a real responsibility
+  derived only from its actual tool membership, never a raw cluster or
+  candidate ID;
+- state a directional favorite when one exists, with confidence in ordinary
+  language; and
+- end with a direct choice such as `Reply “1” for ... or “2” for ...`.
+
+For the common provisional two-specialist result, use this shape:
+
+1. **One streamlined agent** — the retained tools on one agent, best for
+   simplicity and no delegation overhead.
+2. **Two specialists — recommended, provisional** — two coherent working sets,
+   named by semantic responsibility, with shared tools called out separately.
+
+Explain limited confidence without exposing implementation fields. For
+example: “Some tool-definition and exposure measurements are incomplete, so
+the two-agent advantage is directional rather than proven.” Do not include
+`status`, `evidence_status`, `pareto_candidate_ids`, `search_strategy`,
+`exposure_evidence_sufficient`, raw cluster IDs, replay state, generated
+filenames, internal field names, or an internal checklist in the default
+response. Put token savings and other exact measurements under an optional
+`Analysis details` section only when they help the decision or the user asks
+for technical evidence.
+
+Say “Both options exclude the tools that appear safe to remove from the active
+surface,” not “Prune dead tools now.” The skill is advisory and has not applied
+anything.
+
+Replay is optional advanced validation. Do not suggest it in the normal
+architecture-choice flow unless the user asks about validation. If requested,
+follow the recorded-observation protocol in `REPLAY.md`; never launch live
+model calls, shell commands, network/API actions, external writes, or live A/B
+experiments automatically.
 
 Then follow the matching evidence branch:
 
-- **Incomplete evidence:** if `specialist_recommendation.pareto_candidate_ids`
-  is empty, state that there are no cost-complete empirical Pareto candidates
-  under `observed_only`. If structural and sensitivity signals consistently
-  favor one architecture, give a provisional best guess rather than refusing
-  direction; otherwise give no recommendation. Do not call this a universal
+- **Incomplete evidence:** if
+  `specialist_recommendation.pareto_candidate_ids` is empty, use that fact
+  internally to avoid calling the specialist result proven. If structural and
+  sensitivity signals consistently favor one architecture, give a provisional
+  best guess rather than refusing direction; otherwise give no recommendation.
+  In the default response, explain the limitation in plain language rather than
+  naming the empty field or measurement model. Do not call this a universal
   “no Pareto” result or infer exposure from calls. Use the controlled
   measurement layer when a decision needs missing schema, token, routing,
   latency, or quality evidence.
@@ -80,21 +119,41 @@ Then follow the matching evidence branch:
   facts; retain multiple candidates when the trade-offs are genuinely Pareto.
 
 In either branch, explain what is retained, removed, grouped, or left on the
-parent, and stop after the advisory options. Do not generate, install, apply,
-or silently select an agent configuration. Replay or a controlled runtime
-experiment is required before claiming quality preservation or production
-superiority. A provisional two-agent result should be phrased as “two agents
-are the strongest current hypothesis,” not “the optimizer proved two agents
-are best.”
+parent, and stop after the advisory options until the user chooses one. A
+provisional two-agent result should be phrased as “two agents are the strongest
+current hypothesis,” not “the optimizer proved two agents are best.” Do not
+claim production superiority without validation.
 
-When that provisional branch is selected, the normal artifact also emits a
-`provisional_two_specialists` manifest entry marked `provisional` and
-`directional_only`; it is separate from `pareto_candidate_ids` but replayable.
-The normal report presents it beside the pruned flat option and leaves the
-choice to the user. If the user later chooses validation, use the paired
-capture runner to execute the frozen baseline and that candidate under matched
-tasks, record the harness observation fields, and then pass the captured bundle
-plus its paired manifest to the existing replay evaluator.
+## Explicit architecture-choice branch
+
+When the user replies with an option number (or clearly names an option), that
+choice authorizes creation of new agent-definition files for the selected
+option. Do not send them to replay first. Enter the generation branch:
+
+1. Load the selected option from the architecture manifest and inspect its
+  actual parent, specialist, and shared-tool membership.
+2. Infer each working set's semantic responsibility from the tool families and
+  metadata; replace anonymous IDs with useful names and concise routing
+  descriptions. Treat these names and routes as hypotheses and flag any
+  ambiguity. Names must be derived only from the selected membership; do not
+  force a broader responsibility than the tools support.
+3. Write the proposed agent names, routing instructions, and host-specific
+  agent definitions for the selected architecture and create them directly
+  when the destinations are new and unambiguous. Report exactly what was
+  created and where.
+4. Ask for confirmation instead of creating files only if an existing file
+  would be overwritten, existing agent/MCP/plugin/IDE configuration would be
+  modified, the destination is ambiguous, or the host-specific agent format
+  cannot be determined safely.
+
+For option 1, generate one streamlined definition with the retained tools. For
+option 2, generate the parent/shared definition plus one definition per
+specialist. Do not reuse `cluster_01`, `cluster_03`, or similar implementation
+identifiers as user-facing names.
+
+When that provisional branch is selected, use its manifest membership to create
+the definitions; do not treat provisional status as a blocker. If the user
+later asks for validation, use the replay workflow in `REPLAY.md`.
 
 ## Decision rule
 
@@ -107,11 +166,11 @@ Specialists are worth considering only when their context savings plausibly exce
 Use these only when the normal workflow needs help:
 
 - **Discovery repair:** use `inspect_codex_telemetry.py` to inspect supported telemetry structure when automatic discovery fails. Keep inspection structural and privacy-preserving; do not read prompts, tool arguments, command output, source code, or secrets merely to locate telemetry.
-- **Empirical validation:** when the user wants quality, routing, or token validation, explicitly select an architecture option and provide an exact recorded-observation bundle to the normal command or use `replay_architectures.py` with `architecture_manifest.json`. Replay is advanced opt-in; live A/B remains explicit opt-in. Its strict frozen-baseline check still applies. Do not read the manifest during ordinary interpretation unless exact memberships are needed.
+- **Empirical validation:** when the user asks for quality, routing, or token validation, follow `REPLAY.md` and use the recorded-observation workflow. Replay is advanced opt-in; live A/B remains explicit opt-in.
 - **Controlled surface measurement:** when historical schema exposure is incomplete, use `MEASUREMENT.md`, `measurement_input.example.json`, and `measure_tool_surfaces.py` to compare two externally captured, otherwise-identical runs. This records evidence; it does not adopt dynamic retrieval or change partition search.
 
 ## Evidence and privacy
 
 Use tool names, provider names, session counts, call order, definition metadata, and exposure indicators. Avoid reproducing user content, prompts, arguments, outputs, source code, credentials, or tokens.
 
-Do not claim production superiority from telemetry alone. Replay or another controlled quality experiment is required before applying a specialist architecture.
+Do not claim production superiority from telemetry alone. Validation is needed for that claim, not for creating a user-selected provisional architecture.
