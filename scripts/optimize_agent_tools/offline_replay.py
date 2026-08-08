@@ -21,11 +21,6 @@ class ReplayReadiness:
     reasons: tuple[str, ...] = ()
 
 
-def _architecture_ids(report: Mapping[str, Any]) -> tuple[str, ...]:
-    manifest = build_architecture_manifest(report["architecture_manifest"])
-    return manifest.architecture_ids
-
-
 def assess_recorded_replay(
     report: Mapping[str, Any], bundle: Mapping[str, Any]
 ) -> ReplayReadiness:

@@ -65,6 +65,8 @@ class BenchmarkArchitecture:
                 "agent_count must equal the number of actual agents for the "
                 f"{self.topology} topology."
             )
+        if self.topology == "flat" and self.agent_tools:
+            raise ValueError("Flat architectures cannot declare specialist agents.")
         if self.topology == "peer":
             if self.parent_tools:
                 raise ValueError("Peer architectures cannot have parent-owned tools.")
@@ -149,11 +151,7 @@ class BenchmarkArchitecture:
     ) -> CapabilityCoverage:
         """Classify capabilities as direct, delegated-reachable, or unavailable."""
         requested = _string_set(capabilities, "capabilities")
-        direct = (
-            requested & (self.agent_tools.get(agent_id, frozenset()) | self.parent_tools)
-            if agent_id in self.agent_tools
-            else frozenset()
-        )
+        direct = requested & self.agent_tools.get(agent_id, frozenset())
         reachable = requested & (self.effective_tools(agent_id) - direct)
         return CapabilityCoverage(
             direct=direct,
@@ -360,7 +358,7 @@ def serialize_architecture_manifest(manifest: ArchitectureManifest) -> dict[str,
             entry["placement_strategy"] = architecture.placement_strategy
         if topology != "peer":
             entry["parent_tools"] = sorted(architecture.parent_tools)
-        else:
+        if topology != "flat":
             entry["shared_tools"] = sorted(
                 set().union(*architecture.shared_tools.values())
                 if architecture.shared_tools
@@ -368,7 +366,11 @@ def serialize_architecture_manifest(manifest: ArchitectureManifest) -> dict[str,
             )
             entry["delegation"] = {
                 "enabled": bool(architecture.delegation_edges),
-                "topology": " <-> ".join(sorted(architecture.agent_tools)),
+                "topology": (
+                    " <-> ".join(sorted(architecture.agent_tools))
+                    if topology == "peer"
+                    else " -> ".join(["parent", *sorted(architecture.agent_tools)])
+                ),
                 "edges": {
                     agent_id: sorted(targets)
                     for agent_id, targets in architecture.delegation_edges.items()

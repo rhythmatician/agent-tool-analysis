@@ -55,7 +55,7 @@ class PartitionCandidate:
 
     @property
     def agent_count(self) -> int:
-        return len(self.agent_tools)
+        return len(self.agent_tools) + (1 if self.topology == "coordinator_children" else 0)
 
     @property
     def parent_tools(self) -> tuple[str, ...]:
@@ -419,6 +419,7 @@ def _candidate_metrics(
     communication_tokens: float,
     exposure_model: str,
     placement_strategy: str,
+    topology: str,
 ) -> PartitionCandidate:
     costs: tuple[float | None, ...] = tuple(
         _sum_known(_cost(stats.get(tool)) for tool in tools) for tools in agent_tools
@@ -502,7 +503,7 @@ def _candidate_metrics(
     return PartitionCandidate(
         architecture_id=architecture_id,
         agent_tools=agent_tools,
-        topology="peer",
+        topology=topology,
         exclusive_tools=tuple(
             tuple(sorted(set(tools) - shared_tools)) for tools in agent_tools
         ),
@@ -577,10 +578,13 @@ def search_partitions(
     exposure_model: str = "observed_only",
     search_hints: Mapping[str, Any] | None = None,
     session_weights: Mapping[str, float] | None = None,
+    topology: str = "peer",
 ) -> PartitionSearchResult:
     """Search generic, dependency-closed partitions and retain their Pareto frontier."""
     if max_agents < 1:
         raise ValueError("max_agents must be at least 1.")
+    if topology not in {"peer", "coordinator_children"}:
+        raise ValueError("topology must be peer or coordinator_children.")
     if max_exhaustive_units < 1 or max_partition_candidates < 1:
         raise ValueError("Partition search limits must be positive.")
     if communication_tokens_per_handoff < 0 or delegation_tokens_per_activation < 0:
@@ -673,6 +677,7 @@ def search_partitions(
                         communication_tokens_per_handoff,
                         exposure_model,
                         placement_strategy,
+                        topology,
                     )
                     all_candidates.append(candidate)
     frontier = _pareto(all_candidates)
@@ -729,20 +734,42 @@ def search_partitions(
                 )
             },
             "delegation": {
-                "enabled": candidate.agent_count > 1 and bool(candidate.control_tools),
-                "topology": " <-> ".join(
-                    f"agent_{index:02d}"
-                    for index in range(1, candidate.agent_count + 1)
+                "enabled": len(candidate.agent_tools) > 1 and bool(candidate.control_tools),
+                "topology": (
+                    "parent -> "
+                    + ", ".join(
+                        f"agent_{index:02d}"
+                        for index in range(1, len(candidate.agent_tools) + 1)
+                    )
+                    if candidate.topology == "coordinator_children"
+                    else " <-> ".join(
+                        f"agent_{index:02d}"
+                        for index in range(1, len(candidate.agent_tools) + 1)
+                    )
                 ),
                 "edges": {
-                    f"agent_{index:02d}": [
-                        f"agent_{target:02d}"
-                        for target in range(1, candidate.agent_count + 1)
-                        if target != index
-                    ]
-                    for index in range(1, candidate.agent_count + 1)
+                    **(
+                        {
+                            "parent": [
+                                f"agent_{index:02d}"
+                                for index in range(1, len(candidate.agent_tools) + 1)
+                            ]
+                        }
+                        if candidate.topology == "coordinator_children"
+                        else {
+                            f"agent_{index:02d}": [
+                                f"agent_{target:02d}"
+                                for target in range(1, len(candidate.agent_tools) + 1)
+                                if target != index
+                            ]
+                            for index in range(1, len(candidate.agent_tools) + 1)
+                        }
+                    )
                 },
             },
+            "parent_tools": list(candidate.control_tools)
+            if candidate.topology == "coordinator_children"
+            else [],
             "agents": {
                 f"agent_{index:02d}": {
                     "exclusive_tools": list(candidate.exclusive_tools[index - 1]),
@@ -796,7 +823,7 @@ def search_partitions(
             ],
             "global_tools": sorted(global_surface),
             "control_tools": sorted(control_surface),
-            "topology": "peer",
+            "topology": topology,
             "dependency_edges": {
                 tool: sorted(values) for tool, values in sorted(dependencies.items())
             },

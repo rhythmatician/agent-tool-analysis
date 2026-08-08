@@ -1942,11 +1942,14 @@ def _run_analysis(
     nmf_seeds: Iterable[int] = (0, 1, 2),
     nmf_iterations: int = 160,
     freshness_config: FreshnessConfig | None = None,
+    exposure_model: str = "observed_only",
 ) -> AnalysisWorkflowResult:
     if max_agents < 1:
         raise ValueError("max_agents must be at least 1.")
     if communication_tokens_per_handoff < 0:
         raise ValueError("Communication cost cannot be negative.")
+    if exposure_model not in EXPOSURE_MODELS:
+        raise ValueError(f"Unknown exposure model: {exposure_model}")
     observed_names = (
         {
             tool
@@ -2083,6 +2086,13 @@ def _run_analysis(
         for name, record in classify_tool_roles(retained_tools).items()
         if record.role in {"delegation", "coordination"}
     )
+    topology_discovery = discover_topologies(sessions)
+    discovered_topology = topology_discovery["best_candidate"]["topology"]
+    search_topology = (
+        discovered_topology
+        if discovered_topology in {"peer", "coordinator_children"}
+        else "peer"
+    )
     from .partition_search import search_partitions
 
     partition_result = _run_stage(
@@ -2101,15 +2111,16 @@ def _run_analysis(
             baseline_tools=retained_tools,
             control_tools=decomposition_control_tools,
             search_hints=nmf_screening.search_hints,
-            exposure_model="observed_only",
+            exposure_model=exposure_model,
             session_weights=current_weights,
+            topology=search_topology,
         ),
     )
     measurement = frontier_measurement_summary(
         sessions,
         stats,
         retained_tools,
-        "observed_only",
+        exposure_model,
         partition_result.report["search_provenance"],
     )
     partition_result.report.update(
@@ -2121,7 +2132,6 @@ def _run_analysis(
             "assumptions": measurement["assumptions"],
         }
     )
-    topology_discovery = discover_topologies(sessions)
     variants = evaluate_architecture_variants(
         call_sessions,
         stats,
@@ -2352,7 +2362,7 @@ def _run_analysis(
             "search_complete": partition_result.search_complete,
             "search_strategy": partition_result.search_strategy,
             "pareto_scope": partition_result.pareto_scope,
-            "exposure_model": "observed_only",
+            "exposure_model": exposure_model,
             "frontier_kind": measurement["frontier_kind"],
             "directional_only": measurement["directional_only"],
             "exposure_evidence_sufficient": measurement["exposure_evidence_sufficient"],
@@ -2426,6 +2436,7 @@ def analyze(
     nmf_seeds: Iterable[int] = (0, 1, 2),
     nmf_iterations: int = 160,
     freshness_config: FreshnessConfig | None = None,
+    exposure_model: str = "observed_only",
 ) -> dict[str, Any]:
     """Run the analysis workflow and return its stable serialized report."""
 
@@ -2450,5 +2461,6 @@ def analyze(
         nmf_seeds=nmf_seeds,
         nmf_iterations=nmf_iterations,
         freshness_config=freshness_config,
+        exposure_model=exposure_model,
     )
     return result.serialize()

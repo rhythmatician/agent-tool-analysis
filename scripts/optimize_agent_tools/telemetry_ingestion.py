@@ -48,6 +48,7 @@ CODEX_CALL_TYPES = {"custom_tool_call", "function_call", "mcp_tool_call"}
 # are excluded from workload affinity and partition clustering.
 CONTROL_PLANE_TOOLS = frozenset(
     {
+        "agent",
         "followup_task",
         "interrupt_agent",
         "list_agents",
@@ -71,7 +72,7 @@ class ToolRoleRecord:
 
 # Exact runtime-native names only. Unknown tools deliberately remain domain;
 # role classification must not infer semantics from loose string fragments.
-_DELEGATION_TOOLS = frozenset({"followup_task", "spawn_agent"})
+_DELEGATION_TOOLS = frozenset({"agent", "followup_task", "spawn_agent"})
 _COORDINATION_TOOLS = frozenset(
     {"interrupt_agent", "list_agents", "send_message", "wait", "wait_agent"}
 )
