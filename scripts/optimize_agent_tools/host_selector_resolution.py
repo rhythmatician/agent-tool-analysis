@@ -10,6 +10,23 @@ _UNKNOWN_REFERENCE = re.compile(
     r"(?:unknownExtensionReference|unknown extension reference)[^'\"]*['\"]([^'\"]+)['\"]",
     re.IGNORECASE,
 )
+_VERIFIED_SOURCES = {
+    "registry",
+    "local_registry",
+    "mcp",
+    "extension",
+    "existing-agent",
+    "existing_agent",
+    "provider",
+}
+
+
+@dataclass(frozen=True)
+class CapabilityBinding:
+    """The explicit relationship between a capability and telemetry identity."""
+
+    capability: str
+    telemetry_id: str
 
 
 @dataclass(frozen=True)
@@ -20,6 +37,7 @@ class SelectorEvidence:
     selector: str
     source: str
     confidence: str = "verified"
+    telemetry_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -29,10 +47,44 @@ class SelectorResolution:
     selectors: Mapping[str, str]
     unresolved: tuple[str, ...]
     evidence: Mapping[str, SelectorEvidence]
+    ambiguous: tuple[str, ...] = ()
 
     @property
     def isolation_enforced(self) -> bool:
-        return not self.unresolved
+        return not self.unresolved and not self.ambiguous
+
+
+def _is_trusted(item: SelectorEvidence) -> bool:
+    source = item.source.casefold().replace(" ", "_")
+    return (
+        source in _VERIFIED_SOURCES
+        and item.confidence in {"verified", "high"}
+        and bool(item.selector)
+    )
+
+
+def _select_unique(
+    capabilities: Iterable[str],
+    evidence: Iterable[SelectorEvidence],
+) -> tuple[dict[str, str], dict[str, SelectorEvidence], tuple[str, ...]]:
+    requested = sorted(set(capabilities))
+    by_capability: dict[str, list[SelectorEvidence]] = {}
+    for item in evidence:
+        if _is_trusted(item) and item.capability in requested:
+            by_capability.setdefault(item.capability, []).append(item)
+
+    selectors: dict[str, str] = {}
+    resolved_evidence: dict[str, SelectorEvidence] = {}
+    ambiguous: list[str] = []
+    for capability in requested:
+        candidates = by_capability.get(capability, [])
+        selector_values = {item.selector for item in candidates}
+        if len(selector_values) == 1:
+            selectors[capability] = candidates[0].selector
+            resolved_evidence[capability] = candidates[0]
+        elif len(selector_values) > 1:
+            ambiguous.append(capability)
+    return selectors, resolved_evidence, tuple(ambiguous)
 
 
 def resolve_host_selectors(
@@ -40,25 +92,35 @@ def resolve_host_selectors(
     evidence: Iterable[SelectorEvidence],
 ) -> SelectorResolution:
     """Resolve only exact evidence; never infer selectors from punctuation."""
-    evidence_by_capability = {
-        item.capability: item
-        for item in evidence
-        if item.confidence in {"verified", "high"} and item.selector
-    }
-    selectors = {
-        capability: evidence_by_capability[capability].selector
-        for capability in sorted(set(capabilities))
-        if capability in evidence_by_capability
-    }
+    requested = sorted(set(capabilities))
+    selectors, resolved_evidence, ambiguous = _select_unique(requested, evidence)
     unresolved = tuple(
         capability
-        for capability in sorted(set(capabilities))
+        for capability in requested
         if capability not in selectors
     )
-    return SelectorResolution(
-        selectors,
-        unresolved,
-        {capability: evidence_by_capability[capability] for capability in selectors},
+    return SelectorResolution(selectors, unresolved, resolved_evidence, ambiguous)
+
+
+def resolve_telemetry_selectors(
+    bindings: Iterable[CapabilityBinding],
+    evidence: Iterable[SelectorEvidence],
+) -> SelectorResolution:
+    """Translate telemetry IDs only through exact, trusted identity evidence."""
+    binding_list = tuple(bindings)
+    evidence_list = tuple(evidence)
+    matching = [
+        item
+        for item in evidence_list
+        if any(
+            item.capability == binding.capability
+            and item.telemetry_id == binding.telemetry_id
+            for binding in binding_list
+        )
+    ]
+    return resolve_host_selectors(
+        (binding.capability for binding in binding_list),
+        matching,
     )
 
 
@@ -85,13 +147,15 @@ def bounded_selector_repair(
     evidence_by_selector = {
         item.selector: item
         for item in evidence
-        if item.confidence in {"verified", "high"} and item.selector
+        if _is_trusted(item)
     }
     selectors = dict(resolution.selectors)
     resolved_evidence = dict(resolution.evidence)
     for selector in unknown:
         item = evidence_by_selector.get(selector)
         if item is None:
+            continue
+        if item.capability not in resolution.unresolved:
             continue
         selectors[item.capability] = item.selector
         resolved_evidence[item.capability] = item
@@ -100,4 +164,6 @@ def bounded_selector_repair(
         for capability in resolution.unresolved
         if capability not in selectors
     )
-    return SelectorResolution(selectors, unresolved, resolved_evidence)
+    return SelectorResolution(
+        selectors, unresolved, resolved_evidence, resolution.ambiguous
+    )
