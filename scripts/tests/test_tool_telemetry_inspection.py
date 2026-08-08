@@ -27,12 +27,19 @@ from optimize_agent_tools.telemetry_ingestion import (
     EvidenceSession,
     Session,
     extract_codex_calls,
+    event_timestamp,
     extract_codex_dynamic_tool_groups,
     extract_codex_exposures,
     extract_codex_provider_metadata,
     find_raw_tool_call,
     normalize_tool_name,
 )
+
+
+def test_event_timestamp_prefers_embedded_source_time() -> None:
+    assert event_timestamp(
+        {"timestamp": "2026-08-01T12:00:00Z", "payload": {"timestamp": 0}}
+    ).isoformat() == "2026-08-01T12:00:00+00:00"
 from optimize_agent_tools.tool_definition_registry import DefinitionRecord
 
 

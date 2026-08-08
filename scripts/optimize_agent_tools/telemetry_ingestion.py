@@ -42,6 +42,7 @@ TOOL_NAME_REGEX = re.compile(
     r'"(?:tool|function)"\s*:\s*\{\s*"name"\s*:\s*"([^"]+)"'
 )
 CODEX_CALL_TYPES = {"custom_tool_call", "function_call", "mcp_tool_call"}
+_TIMESTAMP_KEYS = ("timestamp", "created_at", "observed_at", "event_time", "time")
 
 # Runtime control-plane tools describe delegation and coordination, not a
 # semantic workload. They remain available for coordination-cost analysis but
@@ -263,6 +264,33 @@ def find_raw_tool_call(event: Any) -> str | None:
     return None
 
 
+def _parse_timestamp(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return datetime.fromtimestamp(value, tz=timezone.utc)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return None
+
+
+def event_timestamp(event: Any) -> datetime | None:
+    """Return a source timestamp when the event carries one."""
+    if not isinstance(event, dict):
+        return None
+    for container in (event, event.get("payload")):
+        if not isinstance(container, dict):
+            continue
+        for key in _TIMESTAMP_KEYS:
+            if timestamp := _parse_timestamp(container.get(key)):
+                return timestamp
+    return None
+
+
 def extract_tool_definitions(event: Any, runtime: str) -> list[DefinitionRecord]:
     records = []
     for node in walk_json(event):
@@ -411,6 +439,7 @@ def get_vscode_sessions(
     )
     for file_path in glob.glob(pattern, recursive=True):
         calls: list[str] = []
+        observed_at: datetime | None = None
         try:
             with open(file_path, "r", encoding="utf-8", errors="ignore") as stream:
                 for line in stream:
@@ -423,6 +452,9 @@ def get_vscode_sessions(
                         event = json.loads(line)
                     except json.JSONDecodeError:
                         continue
+                    timestamp = event_timestamp(event)
+                    if timestamp and (observed_at is None or timestamp > observed_at):
+                        observed_at = timestamp
                     if name := normalize_tool_name(find_raw_tool_call(event)):
                         if not calls or calls[-1] != name:
                             calls.append(name)
@@ -436,9 +468,8 @@ def get_vscode_sessions(
                     f"vscode:{os.path.relpath(file_path, workspace_storage)}",
                     "vscode",
                     calls=calls,
-                    observed_at=datetime.fromtimestamp(
-                        os.path.getmtime(file_path), tz=timezone.utc
-                    ),
+                    observed_at=observed_at
+                    or datetime.fromtimestamp(os.path.getmtime(file_path), tz=timezone.utc),
                 )
             )
     return sessions, definitions
@@ -459,6 +490,7 @@ def get_codex_sessions(
         providers: set[str] = set()
         provider_tools: dict[str, set[str]] = defaultdict(set)
         dynamic_tool_groups: list[DynamicToolGroup] = []
+        observed_at: datetime | None = None
         try:
             with open(file_path, "r", encoding="utf-8", errors="ignore") as stream:
                 for line in stream:
@@ -468,6 +500,9 @@ def get_codex_sessions(
                         event = json.loads(line)
                     except json.JSONDecodeError:
                         continue
+                    timestamp = event_timestamp(event)
+                    if timestamp and (observed_at is None or timestamp > observed_at):
+                        observed_at = timestamp
                     for raw in extract_codex_calls(event):
                         if name := normalize_tool_name(raw):
                             calls.append(name)
@@ -496,9 +531,8 @@ def get_codex_sessions(
                     exposure_source="codex:payload.dynamic_tools[].tools[].name"
                     if exposed
                     else "not_observed",
-                    observed_at=datetime.fromtimestamp(
-                        os.path.getmtime(file_path), tz=timezone.utc
-                    ),
+                    observed_at=observed_at
+                    or datetime.fromtimestamp(os.path.getmtime(file_path), tz=timezone.utc),
                 )
             )
     return sessions, definitions

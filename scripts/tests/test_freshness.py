@@ -60,6 +60,31 @@ def test_trial_tools_expose_relevant_historical_workloads() -> None:
     ]
 
 
+def test_established_mcp_tools_are_not_trials_when_used_recently() -> None:
+    now = datetime(2026, 8, 8, tzinfo=timezone.utc)
+    sessions = [
+        Session(
+            "old",
+            "codex",
+            ["established_mcp"],
+            provider_tools={"example-mcp": {"established_mcp"}},
+            observed_at=now - timedelta(days=30),
+        ),
+        Session(
+            "recent",
+            "codex",
+            ["established_mcp"],
+            provider_tools={"example-mcp": {"established_mcp"}},
+            observed_at=now - timedelta(days=1),
+        ),
+    ]
+
+    report = analyze_freshness(sessions, as_of=now)
+
+    assert report["tools"]["established_mcp"]["trial"] is False
+    assert report["trial"] == []
+
+
 def test_unknown_timestamps_are_not_silently_called_current() -> None:
     report = analyze_freshness([Session("legacy", "codex", ["tool"])])
 
