@@ -18,6 +18,7 @@ from optimize_agent_tools.analysis_pipeline import (
     apply_offline_replay_result,
     load_explicit_tool_costs,
 )
+from optimize_agent_tools.freshness import FreshnessConfig
 from optimize_agent_tools.offline_replay import (
     assess_recorded_replay,
     run_recorded_replay,
@@ -98,6 +99,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--nmf-max-factors", type=int, default=4)
     parser.add_argument("--nmf-seeds", default="0,1,2")
     parser.add_argument("--nmf-iterations", type=int, default=160)
+    parser.add_argument("--freshness-half-life-days", type=float, default=30.0)
+    parser.add_argument("--freshness-current-window-days", type=float, default=90.0)
+    parser.add_argument("--freshness-trial-window-days", type=float, default=14.0)
+    parser.add_argument("--freshness-current-weight-threshold", type=float, default=0.25)
     return parser.parse_args()
 
 
@@ -146,6 +151,12 @@ def _validate_args(args: argparse.Namespace, github_rates: tuple[float, ...]) ->
         raise SystemExit(
             "--offline-replay-input requires --offline-replay-candidate; choose an architecture option explicitly"
         )
+    FreshnessConfig(
+        half_life_days=args.freshness_half_life_days,
+        current_window_days=args.freshness_current_window_days,
+        trial_window_days=args.freshness_trial_window_days,
+        current_weight_threshold=args.freshness_current_weight_threshold,
+    ).validate()
 
 
 def _nmf_seeds(raw: str) -> tuple[int, ...]:
@@ -194,6 +205,12 @@ def main() -> int:
         nmf_max_factors=args.nmf_max_factors,
         nmf_seeds=nmf_seeds,
         nmf_iterations=args.nmf_iterations,
+        freshness_config=FreshnessConfig(
+            half_life_days=args.freshness_half_life_days,
+            current_window_days=args.freshness_current_window_days,
+            trial_window_days=args.freshness_trial_window_days,
+            current_weight_threshold=args.freshness_current_weight_threshold,
+        ),
     )
     if args.offline_replay_input:
         replay_input_path = Path(args.offline_replay_input)

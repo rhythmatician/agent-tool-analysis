@@ -8,6 +8,7 @@ import os
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from .tool_definition_registry import (
@@ -145,6 +146,7 @@ class EvidenceSession:
     provider_availability: set[str] = field(default_factory=set)
     provider_tools: dict[str, set[str]] = field(default_factory=dict)
     dynamic_tool_groups: list[DynamicToolGroup] = field(default_factory=list)
+    observed_at: datetime | None = None
 
     @property
     def runtime(self) -> str:
@@ -433,6 +435,9 @@ def get_vscode_sessions(
                     f"vscode:{os.path.relpath(file_path, workspace_storage)}",
                     "vscode",
                     calls=calls,
+                    observed_at=datetime.fromtimestamp(
+                        os.path.getmtime(file_path), tz=timezone.utc
+                    ),
                 )
             )
     return sessions, definitions
@@ -490,6 +495,9 @@ def get_codex_sessions(
                     exposure_source="codex:payload.dynamic_tools[].tools[].name"
                     if exposed
                     else "not_observed",
+                    observed_at=datetime.fromtimestamp(
+                        os.path.getmtime(file_path), tz=timezone.utc
+                    ),
                 )
             )
     return sessions, definitions

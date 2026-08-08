@@ -131,17 +131,23 @@ def _build_graph(
     sessions: list[EvidenceSession],
     tools: frozenset[str],
     excluded_tools: frozenset[str] = frozenset(),
+    session_weights: Mapping[str, float] | None = None,
 ) -> _Graph:
-    total_sessions = len(sessions)
-    total_calls = sum(len(session.called_tools) for session in sessions)
-    co_sessions: dict[tuple[str, str], int] = {}
-    adjacency: dict[tuple[str, str], int] = {}
+    weights = session_weights or {}
+    total_sessions = sum(weights.get(session.session_id, 1.0) for session in sessions)
+    total_calls = sum(
+        len(session.called_tools) * weights.get(session.session_id, 1.0)
+        for session in sessions
+    )
+    co_sessions: dict[tuple[str, str], float] = {}
+    adjacency: dict[tuple[str, str], float] = {}
     for session in sessions:
+        session_weight = weights.get(session.session_id, 1.0)
         session_tools = sorted((session.tool_set & tools) - excluded_tools)
         for index, left in enumerate(session_tools):
             for right in session_tools[index + 1 :]:
                 key = _pair_key(left, right)
-                co_sessions[key] = co_sessions.get(key, 0) + 1
+                co_sessions[key] = co_sessions.get(key, 0.0) + session_weight
         for left, right in zip(session.called_tools, session.called_tools[1:]):
             if (
                 left != right
@@ -151,7 +157,7 @@ def _build_graph(
                 and right not in excluded_tools
             ):
                 key = _pair_key(left, right)
-                adjacency[key] = adjacency.get(key, 0) + 1
+                adjacency[key] = adjacency.get(key, 0.0) + session_weight
     weights = {
         key: (co_sessions.get(key, 0) / total_sessions if total_sessions else 0.0)
         + (adjacency.get(key, 0) / total_calls if total_calls else 0.0)
@@ -530,6 +536,7 @@ def search_partitions(
     baseline_tools: Iterable[str] | None = None,
     exposure_model: str = "observed_only",
     search_hints: Mapping[str, Any] | None = None,
+    session_weights: Mapping[str, float] | None = None,
 ) -> PartitionSearchResult:
     """Search generic, dependency-closed partitions and retain their Pareto frontier."""
     if max_agents < 1:
@@ -565,7 +572,7 @@ def search_partitions(
     if not global_surface <= retained:
         raise ValueError("Global tools must be retained tools.")
     shared_seed = global_surface | control_surface
-    graph = _build_graph(session_list, retained, control_surface)
+    graph = _build_graph(session_list, retained, control_surface, session_weights)
     units = _dependency_units(retained, dependencies, shared_seed)
     hinted_units = _order_units_by_hints(units, search_hints)
     all_candidates: list[PartitionCandidate] = []
