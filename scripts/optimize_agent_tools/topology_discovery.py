@@ -76,10 +76,13 @@ def discover_topologies(
         if pair in seen_pairs:
             continue
         seen_pairs.add(pair)
-        symmetric_mass += 2 * min(
-            transitions[(left, right)],
-            transitions.get((right, left), 0),
-        )
+        if left == right:
+            symmetric_mass += transitions[(left, right)]
+        else:
+            symmetric_mass += 2 * min(
+                transitions[(left, right)],
+                transitions.get((right, left), 0),
+            )
     origin_symmetry = (symmetric_mass / forward) if forward else 0.0
     delegation_rate = (
         delegation_sessions / len(session_list) if session_list else 0.0
