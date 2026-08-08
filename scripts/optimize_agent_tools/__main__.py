@@ -95,6 +95,9 @@ def parse_args() -> argparse.Namespace:
         "--github-exposure-rates",
         default=",".join(f"{rate:g}" for rate in DEFAULT_GITHUB_EXPOSURE_RATES),
     )
+    parser.add_argument("--nmf-max-factors", type=int, default=4)
+    parser.add_argument("--nmf-seeds", default="0,1,2")
+    parser.add_argument("--nmf-iterations", type=int, default=160)
     return parser.parse_args()
 
 
@@ -129,6 +132,10 @@ def _validate_args(args: argparse.Namespace, github_rates: tuple[float, ...]) ->
         raise SystemExit("--max-agents must be >= 1")
     if args.communication_tokens_per_handoff < 0:
         raise SystemExit("--communication-tokens-per-handoff cannot be negative")
+    if getattr(args, "nmf_max_factors", 4) < 1:
+        raise SystemExit("--nmf-max-factors must be >= 1")
+    if getattr(args, "nmf_iterations", 160) < 1:
+        raise SystemExit("--nmf-iterations must be >= 1")
     if not github_rates:
         raise SystemExit("--github-exposure-rates must contain at least one rate")
     if args.offline_replay_candidate and not args.offline_replay_input:
@@ -141,9 +148,20 @@ def _validate_args(args: argparse.Namespace, github_rates: tuple[float, ...]) ->
         )
 
 
+def _nmf_seeds(raw: str) -> tuple[int, ...]:
+    try:
+        seeds = tuple(int(value.strip()) for value in raw.split(",") if value.strip())
+    except ValueError as error:
+        raise SystemExit("--nmf-seeds must be comma-separated integers") from error
+    if not seeds:
+        raise SystemExit("--nmf-seeds must contain at least one integer")
+    return seeds
+
+
 def main() -> int:
     args = parse_args()
     github_rates = _github_rates(args.github_exposure_rates)
+    nmf_seeds = _nmf_seeds(args.nmf_seeds)
     _validate_args(args, github_rates)
     vscode_sessions, vscode_defs = get_vscode_sessions(args.vscode_workspace_storage)
     codex_sessions, codex_defs = get_codex_sessions(args.codex_sessions_dir)
@@ -173,6 +191,9 @@ def main() -> int:
         max_agents=args.max_agents,
         communication_tokens_per_handoff=args.communication_tokens_per_handoff,
         github_exposure_rates=github_rates,
+        nmf_max_factors=args.nmf_max_factors,
+        nmf_seeds=nmf_seeds,
+        nmf_iterations=args.nmf_iterations,
     )
     if args.offline_replay_input:
         replay_input_path = Path(args.offline_replay_input)

@@ -36,8 +36,15 @@ from .exposure_models import (
     provider_scoped_session_diagnostics,
 )
 from .exposure_reporting import build_exposure_matrix, exposure_matrix_summary
+from .nmf_screening import NMFConfig, run_nmf_screening
 from .replay_harness import BASELINE_ARCHITECTURE_ID
-from .telemetry_ingestion import Session, normalize_tool_name
+from .telemetry_ingestion import (
+    CONTROL_PLANE_TOOLS,
+    Session,
+    classify_tool_roles,
+    normalize_tool_name,
+    tool_role,
+)
 from .tool_definition_registry import (
     DefinitionRecord,
     DefinitionRegistry,
@@ -854,13 +861,15 @@ def expected_known_token_cost(
         for agent in candidate_agents
         for tool in agent["tools"]
     }
-    parent_tools = {tool for tool in known if tool not in membership} | (
-        global_tools & known
-    )
+    shared_known = global_tools & known
+    parent_tools = {
+        tool for tool in known if tool not in membership and tool not in shared_known
+    }
     agent_costs = {
         agent["candidate_id"]: sum(
             stats[t].definition_tokens or 0 for t in agent["tools"] if t in known
         )
+        + sum(stats[t].definition_tokens or 0 for t in shared_known)
         for agent in candidate_agents
     }
     per_session = []
@@ -925,7 +934,7 @@ def expected_known_token_cost(
             else 0.0,
         },
         "flat_baseline_known_tokens": baseline,
-        "parent_known_tokens_after_partition": statistics.fmean(
+        "unassigned_known_tokens_after_partition": statistics.fmean(
             sum(
                 stats[name].definition_tokens or 0
                 for name in session.exposed_tools
@@ -959,7 +968,7 @@ def expected_known_token_cost(
             exposure_sessions=exposure_sessions,
         ),
         "cost_scenarios_by_exposure_model": scenarios,
-        "interpretation": "Known-token estimate using directly observed exposure only. Unknown tool-definition costs are excluded. Recovered telemetry costs use a chars/4 approximation. Unclustered tools remain on the parent to make the estimate conservative. Counterfactual exposure-model results are reported separately.",
+        "interpretation": "Known-token estimate using directly observed exposure only. Unknown tool-definition costs are excluded. Recovered telemetry costs use a chars/4 approximation. Shared tools are charged once per activated agent context; unassigned tools remain conservatively available to the flat surface. Counterfactual exposure-model results are reported separately.",
     }
 
 
@@ -1092,9 +1101,8 @@ def expected_token_cost_scenarios(
     }
     agents = {agent["candidate_id"]: agent for agent in candidate_agents}
     baseline_surface = set(stats) if baseline_tools is None else set(baseline_tools)
-    parent_tools = (baseline_surface - set(membership)) | (
-        global_tools & baseline_surface
-    )
+    shared_surface = global_tools & baseline_surface
+    parent_tools = baseline_surface - set(membership) - shared_surface
 
     def total_cost(names: Iterable[str], scenario: str) -> float | None:
         costs = []
@@ -1121,7 +1129,10 @@ def expected_token_cost_scenarios(
                 membership[tool] for tool in exposure.actual_calls if tool in membership
             }
             for candidate_id in activated:
-                specialist_cost = total_cost(agents[candidate_id]["tools"], scenario)
+                specialist_cost = total_cost(
+                    set(agents[candidate_id]["tools"]) | shared_surface,
+                    scenario,
+                )
                 if specialist_cost is None:
                     proposed = None
                     break
@@ -1363,7 +1374,7 @@ def classify_specialist_recommendation(
             "direction": f"{agent_count}-agent architecture",
             "confidence": "high" if status == "proven" else "moderate",
             "best_guess_architecture": (
-                "two_specialists"
+                "two_agents"
                 if agent_count == 2
                 else f"{agent_count}_agent_architecture"
             ),
@@ -1391,8 +1402,9 @@ def classify_specialist_recommendation(
         minimum_value = sensitivity.get("min_mid_reduction")
         maximum_value = sensitivity.get("max_mid_reduction")
         if (
-            (minimum_value is not None and not isinstance(minimum_value, (int, float)))
-            or (maximum_value is not None and not isinstance(maximum_value, (int, float)))
+            minimum_value is not None and not isinstance(minimum_value, (int, float))
+        ) or (
+            maximum_value is not None and not isinstance(maximum_value, (int, float))
         ):
             continue
         if minimum_value is None:
@@ -1413,7 +1425,7 @@ def classify_specialist_recommendation(
             "status": "provisional",
             "direction": "2-agent architecture",
             "confidence": "moderate-low",
-            "best_guess_architecture": "two_specialists",
+            "best_guess_architecture": "two_agents",
             "best_guess_candidate_id": None,
             "why": [
                 "strong structural separation across multiple candidate tool families",
@@ -1450,6 +1462,7 @@ def materialize_provisional_architecture(
     global_tools: Iterable[str],
     search_provenance: Mapping[str, Any],
     dependencies: Mapping[str, Iterable[str]] | None = None,
+    search_candidates: Iterable[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """Materialize the strongest directional two-agent hypothesis.
 
@@ -1462,6 +1475,76 @@ def materialize_provisional_architecture(
         return None
     if recommendation.get("direction") != "2-agent architecture":
         return None
+
+    searched = [
+        candidate
+        for candidate in (search_candidates or ())
+        if int(candidate.get("agent_count", 0)) == 2
+    ]
+    if searched:
+        selected_candidate = min(
+            searched,
+            key=lambda candidate: (
+                candidate.get("expected_context_cost_after_communication") is None,
+                candidate.get("expected_context_cost_after_communication")
+                or float("inf"),
+                str(candidate.get("architecture_id", "")),
+            ),
+        )
+        raw_agents = selected_candidate.get("agents", {})
+        if not raw_agents and selected_candidate.get("agent_tools"):
+            shared = set(selected_candidate.get("shared_tools", ()))
+            raw_agents = {
+                f"agent_{index:02d}": {
+                    "exclusive_tools": list(
+                        selected_candidate.get("exclusive_tools", ())[index - 1]
+                    ),
+                    "shared_tools": sorted(shared),
+                    "tools": list(tools),
+                }
+                for index, tools in enumerate(
+                    selected_candidate["agent_tools"], start=1
+                )
+            }
+        if not isinstance(raw_agents, Mapping) or len(raw_agents) != 2:
+            return None
+        shared = set(selected_candidate.get("shared_tools", ()))
+        control = set(selected_candidate.get("control_tools", ()))
+        return {
+            "architecture_id": "provisional_two_agents",
+            "topology": "peer",
+            "agent_count": 2,
+            "shared_tools": {str(agent_id): sorted(shared) for agent_id in raw_agents},
+            "control_tools": sorted(control),
+            "delegation": {
+                "enabled": bool(control),
+                "topology": "agent_01 <-> agent_02",
+                "edges": {
+                    "agent_01": ["agent_02"],
+                    "agent_02": ["agent_01"],
+                },
+            },
+            "agents": {
+                str(agent_id): {
+                    "exclusive_tools": sorted(set(agent.get("exclusive_tools", ()))),
+                    "shared_tools": sorted(shared),
+                    "tools": sorted(set(agent.get("tools", ())) | shared),
+                }
+                for agent_id, agent in raw_agents.items()
+            },
+            "provisional": True,
+            "directional_only": True,
+            "assumptions": [
+                "membership comes from the dependency-closed partition search",
+                "exposure or definition costs remain incomplete",
+                "agent names, routes, and quality preservation remain hypotheses",
+            ],
+            "provenance": {
+                "source": "partition_search_candidate",
+                "candidate_id": selected_candidate.get("architecture_id"),
+                "search_provenance": dict(search_provenance),
+            },
+        }
 
     agents = list(candidate_agents)
     variants = list(directional_variants)
@@ -1508,15 +1591,28 @@ def materialize_provisional_architecture(
         while pending:
             tool = pending.pop()
             for dependency in dependency_map.get(tool, ()):
-                if dependency in retained and dependency not in global_set and dependency not in tools:
+                if (
+                    dependency in retained
+                    and dependency not in global_set
+                    and dependency not in tools
+                ):
                     tools.append(dependency)
                     pending.append(dependency)
         tools.sort()
     specialist_tools = [tools for tools in specialist_tools if tools]
     if len(specialist_tools) != 2:
         return None
-    assigned = set().union(*map(set, specialist_tools))
-    architecture_id = "provisional_two_specialists"
+    shared = retained & (global_set | set(CONTROL_PLANE_TOOLS))
+    assigned = set().union(*map(set, specialist_tools)) | shared
+    # A peer architecture cannot strand retained capabilities on an implicit
+    # parent. Preserve capability coverage by assigning any unclustered tools
+    # to the first peer; the partition search remains the source of truth for
+    # measured assignments.
+    unassigned = sorted(retained - assigned)
+    if unassigned:
+        specialist_tools[0].extend(unassigned)
+        specialist_tools[0].sort()
+    architecture_id = "provisional_two_agents"
     assumptions = [
         "tool-family separation is inferred from structural clusters, not measured runtime routing",
         "sensitivity ranges are directional because exposure or definition costs are incomplete",
@@ -1538,9 +1634,16 @@ def materialize_provisional_architecture(
     }
     return {
         "architecture_id": architecture_id,
-        "parent_tools": sorted(retained - assigned),
+        "topology": "peer",
+        "agent_count": 2,
+        "shared_tools": {f"agent_{index:02d}": sorted(shared) for index in range(1, 3)},
+        "control_tools": sorted(shared & set(CONTROL_PLANE_TOOLS)),
         "agents": {
-            f"agent_{index:02d}": tools
+            f"agent_{index:02d}": {
+                "exclusive_tools": sorted(set(tools) - shared),
+                "shared_tools": sorted(shared),
+                "tools": sorted(set(tools) | shared),
+            }
             for index, tools in enumerate(specialist_tools, start=1)
         },
         "provisional": True,
@@ -1555,9 +1658,7 @@ def _semantic_agent_details(
 ) -> dict[str, Any]:
     """Give an anonymous tool group a readable, explicitly provisional label."""
     tool_list = sorted(set(tools))
-    families = Counter(
-        tool.split(".", 1)[0].split("_", 1)[0] for tool in tool_list
-    )
+    families = Counter(tool.split(".", 1)[0].split("_", 1)[0] for tool in tool_list)
     family = families.most_common(1)[0][0] if families else "tool"
     family_label = family.replace("-", " ").replace("_", " ").title()
     if len(families) == 1:
@@ -1571,9 +1672,7 @@ def _semantic_agent_details(
         "name": name,
         "role": role,
         "description": (
-            "Handles the tools in this inferred cluster: "
-            + ", ".join(tool_list)
-            + "."
+            "Handles the tools in this inferred cluster: " + ", ".join(tool_list) + "."
         ),
         "tools": tool_list,
         "semantic_status": "provisional",
@@ -1633,22 +1732,44 @@ def build_architecture_options(
         architecture = manifest_architectures[architecture_id]
         is_provisional = architecture_id in provisional_ids
         agents = [
-            _semantic_agent_details(agent_id, tools, index)
+            {
+                **_semantic_agent_details(
+                    agent_id,
+                    tools.get("tools", []) if isinstance(tools, Mapping) else tools,
+                    index,
+                ),
+                "exclusive_tools": sorted(
+                    tools.get("exclusive_tools", [])
+                    if isinstance(tools, Mapping)
+                    else tools
+                ),
+                "shared_tools": sorted(
+                    tools.get("shared_tools", []) if isinstance(tools, Mapping) else []
+                ),
+            }
             for index, (agent_id, tools) in enumerate(
                 sorted((architecture.get("agents") or {}).items()), start=1
             )
         ]
+        shared_tools = architecture.get("shared_tools", {})
+        if isinstance(shared_tools, Mapping):
+            shared_tools = sorted(
+                set().union(*(set(values) for values in shared_tools.values()))
+            )
         options.append(
             {
                 "option_id": architecture_id,
                 "architecture_id": architecture_id,
                 "label": (
-                    "Two specialists"
-                    if architecture_id == "provisional_two_specialists"
+                    "Two cooperating agents"
+                    if architecture.get("topology") == "peer" and len(agents) == 2
                     else f"Empirical finalist {architecture_id}"
                 ),
                 "status": "provisional" if is_provisional else "empirical_pareto",
+                "topology": architecture.get("topology", "flat"),
+                "agent_count": architecture.get("agent_count", len(agents)),
                 "parent_tools": sorted(architecture.get("parent_tools", [])),
+                "shared_tools": list(shared_tools or []),
                 "agents": agents,
                 "why_choose": (
                     [
@@ -1776,6 +1897,9 @@ def analyze(
     max_exhaustive_units: int = 10,
     max_partition_candidates: int = 5000,
     github_exposure_rates: Iterable[float] = DEFAULT_GITHUB_EXPOSURE_RATES,
+    nmf_max_factors: int = 4,
+    nmf_seeds: Iterable[int] = (0, 1, 2),
+    nmf_iterations: int = 160,
 ) -> dict[str, Any]:
     if max_agents < 1:
         raise ValueError("max_agents must be at least 1.")
@@ -1806,6 +1930,9 @@ def analyze(
         call_sessions=call_sessions,
         exposure_sessions=exposure_sessions,
     )
+    role_records = classify_tool_roles(stats)
+    classifications = classify_tools(stats, global_usage_threshold)
+    global_tools = choose_global_tools(stats, global_usage_threshold)
     session_index = build_session_index(call_sessions)
     pairs = all_pair_metrics(
         sorted(
@@ -1815,11 +1942,28 @@ def analyze(
         build_adjacency_counts(call_sessions),
     )
     active_tools = sorted(
-        name for name, stat in stats.items() if stat.sessions >= min_tool_sessions
+        name
+        for name, stat in stats.items()
+        if stat.sessions >= min_tool_sessions
+        and role_records[name].role not in {"delegation", "coordination"}
+    )
+    nmf_screening = run_nmf_screening(
+        call_sessions,
+        [
+            tool
+            for tool, stat in stats.items()
+            if stat.sessions >= min_tool_sessions
+            and role_records[tool].role == "domain"
+            and tool not in global_tools
+        ],
+        role_records,
+        config=NMFConfig(
+            max_factors=nmf_max_factors,
+            seeds=tuple(nmf_seeds),
+            iterations=nmf_iterations,
+        ),
     )
     clusters = agglomerative_clusters(active_tools, pairs, similarity_threshold)
-    classifications = classify_tools(stats, global_usage_threshold)
-    global_tools = choose_global_tools(stats, global_usage_threshold)
     candidates = make_candidate_agents(
         clusters,
         global_tools,
@@ -1895,6 +2039,8 @@ def analyze(
         max_exhaustive_units=max_exhaustive_units,
         max_partition_candidates=max_partition_candidates,
         baseline_tools=retained_tools,
+        control_tools=CONTROL_PLANE_TOOLS,
+        search_hints=nmf_screening.search_hints,
         exposure_model="observed_only",
     )
     measurement = frontier_measurement_summary(
@@ -2004,8 +2150,16 @@ def analyze(
         global_tools=global_tools,
         search_provenance=partition_result.report["search_provenance"],
         dependencies=KNOWN_DEPENDENCIES,
+        search_candidates=(
+            partition_result.report.get("candidates", [])
+            if specialist_classification["status"] == "provisional"
+            else None
+        ),
     )
-    if specialist_classification["status"] == "provisional" and provisional_architecture is None:
+    if (
+        specialist_classification["status"] == "provisional"
+        and provisional_architecture is None
+    ):
         specialist_classification = {
             **specialist_classification,
             "status": "none",
@@ -2086,12 +2240,25 @@ def analyze(
             "min_cluster_sessions": min_cluster_sessions,
             "delegation_overhead_tokens": delegation_overhead_tokens,
             "github_exposure_rates": list(github_exposure_rates),
+            "nmf_max_factors": nmf_max_factors,
+            "nmf_seeds": list(nmf_seeds),
+            "nmf_iterations": nmf_iterations,
         },
         "tools": tools_report,
         "exposure_matrix": build_exposure_matrix(sessions, stats),
         "exposure_matrix_summary": exposure_matrix_summary(sessions, stats),
         "exposure_consistency": exposure_consistency(sessions),
         "measurement_completeness": measurement,
+        "tool_roles": [
+            {
+                "tool": record.tool,
+                "role": record.role,
+                "evidence": record.evidence,
+                "confidence": record.confidence,
+            }
+            for record in role_records.values()
+        ],
+        "nmf_screening": nmf_screening.as_dict(),
         "exposure_models": exposure_model_summary(sessions),
         "github_exposure_sensitivity": github_sensitivity,
         "cluster_one_subset_analysis": subset_analysis,

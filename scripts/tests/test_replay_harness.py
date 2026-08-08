@@ -77,6 +77,30 @@ def test_manifest_supports_arbitrary_architectures_and_owns_its_baseline() -> No
     }
 
 
+def test_peer_effective_tools_include_reachable_delegated_capabilities() -> None:
+    raw = manifest_raw()
+    raw["architectures"][1] = {
+        **raw["architectures"][1],
+        "topology": "peer",
+        "agent_count": 2,
+        "parent_tools": [],
+        "agents": {
+            "review_agent": {"tools": ["review_tool"], "shared_tools": []},
+            "file_agent": {"tools": ["file_tool"], "shared_tools": []},
+        },
+        "shared_tools": {"review_agent": [], "file_agent": []},
+        "delegation": {
+            "edges": {"review_agent": ["file_agent"], "file_agent": []}
+        },
+    }
+    architecture = build_architecture_manifest(raw).architectures[1]
+
+    assert architecture.parent_tools == frozenset()
+    assert architecture.effective_tools("review_agent") == frozenset(
+        {"review_tool", "file_tool"}
+    )
+
+
 def test_manifest_requires_pruned_flat_baseline_name() -> None:
     raw = manifest_raw()
     raw["baseline_architecture_id"] = "some_other_baseline"

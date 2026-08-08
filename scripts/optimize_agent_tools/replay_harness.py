@@ -19,23 +19,77 @@ def _string_set(values: Iterable[str], field_name: str) -> frozenset[str]:
 
 @dataclass(frozen=True)
 class BenchmarkArchitecture:
-    """One manifest architecture with arbitrary parent and agent surfaces."""
+    """One flat, peer, or explicitly coordinator-based architecture."""
 
     architecture_id: str
     parent_tools: frozenset[str]
     agent_tools: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    topology: str = "coordinator_specialists"
+    shared_tools: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    control_tools: frozenset[str] = frozenset()
+    delegation_edges: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    declared_agent_count: int | None = None
 
     def __post_init__(self) -> None:
         if not self.architecture_id:
             raise ValueError("Architecture IDs must be non-empty.")
         if any(not agent_id for agent_id in self.agent_tools):
             raise ValueError("Agent IDs must be non-empty.")
+        if self.topology not in {"flat", "peer", "coordinator_specialists"}:
+            raise ValueError(f"Unsupported architecture topology: {self.topology}")
+        if self.topology == "peer":
+            if self.parent_tools:
+                raise ValueError("Peer architectures cannot have parent-owned tools.")
+            if not self.agent_tools:
+                raise ValueError("Peer architectures must contain actual agents.")
+            if (
+                self.declared_agent_count is not None
+                and self.declared_agent_count != len(self.agent_tools)
+            ):
+                raise ValueError(
+                    "Peer agent_count must equal the number of actual agents."
+                )
+            if set(self.shared_tools) != set(self.agent_tools):
+                raise ValueError("Peer shared_tools must name every actual agent.")
+            for agent_id, tools in self.agent_tools.items():
+                if not self.shared_tools[agent_id] <= tools:
+                    raise ValueError(
+                        f"Peer agent {agent_id!r} is missing its shared tools."
+                    )
+            unknown_edges = set(self.delegation_edges) - set(self.agent_tools)
+            if unknown_edges:
+                raise ValueError("Delegation edges must use declared peer agents.")
+            if any(
+                set(targets) - set(self.agent_tools)
+                for targets in self.delegation_edges.values()
+            ):
+                raise ValueError("Delegation edges must target declared peer agents.")
 
     @property
     def available_tools(self) -> frozenset[str]:
         return frozenset(self.parent_tools) | frozenset(
             tool for tools in self.agent_tools.values() for tool in tools
         )
+
+    @property
+    def agent_count(self) -> int:
+        return len(self.agent_tools)
+
+    def effective_tools(self, agent_id: str) -> frozenset[str]:
+        """Return direct plus explicitly reachable delegated capabilities."""
+        if agent_id not in self.agent_tools:
+            return frozenset()
+        reached = {agent_id}
+        pending = [agent_id]
+        while pending:
+            current = pending.pop()
+            for target in self.delegation_edges.get(current, frozenset()):
+                if target not in reached:
+                    reached.add(target)
+                    pending.append(target)
+        return frozenset(
+            tool for owner in reached for tool in self.agent_tools[owner]
+        ) | frozenset(self.parent_tools)
 
     def requested_activation_path(self, task: ReplayTask) -> tuple[str, ...]:
         """Return the task's explicit route for this architecture, if any."""
@@ -90,13 +144,38 @@ def build_architecture_manifest(raw: Mapping[str, Any]) -> ArchitectureManifest:
     for raw_architecture in raw_architectures:
         if not isinstance(raw_architecture, dict):
             raise ValueError("Each manifest architecture must be an object.")
+        topology = str(raw_architecture.get("topology", "coordinator_specialists"))
         raw_agents = raw_architecture.get("agents", {})
         if not isinstance(raw_agents, dict):
             raise ValueError("Architecture agents must be an object.")
-        agents = {
-            str(agent_id): _string_set(tools, f"agents.{agent_id}")
-            for agent_id, tools in raw_agents.items()
-        }
+        agents: dict[str, frozenset[str]] = {}
+        shared_tools: dict[str, frozenset[str]] = {}
+        raw_shared = raw_architecture.get("shared_tools", {})
+        for agent_id, raw_tools in raw_agents.items():
+            agent_name = str(agent_id)
+            if isinstance(raw_tools, dict):
+                tools = _string_set(
+                    raw_tools.get("tools", []), f"agents.{agent_id}.tools"
+                )
+                shared = _string_set(
+                    raw_tools.get("shared_tools", []),
+                    f"agents.{agent_id}.shared_tools",
+                )
+                if topology == "peer":
+                    exclusive = _string_set(
+                        raw_tools.get("exclusive_tools", []),
+                        f"agents.{agent_id}.exclusive_tools",
+                    )
+                    tools = tools or (exclusive | shared)
+                    if not shared and isinstance(raw_shared, dict):
+                        shared = _string_set(
+                            raw_shared.get(agent_name, []),
+                            f"shared_tools.{agent_name}",
+                        )
+                    shared_tools[agent_name] = shared
+            else:
+                tools = _string_set(raw_tools, f"agents.{agent_id}")
+            agents[agent_name] = tools
         architectures.append(
             BenchmarkArchitecture(
                 architecture_id=str(raw_architecture["architecture_id"]),
@@ -105,6 +184,24 @@ def build_architecture_manifest(raw: Mapping[str, Any]) -> ArchitectureManifest:
                     "parent_tools",
                 ),
                 agent_tools=agents,
+                topology=topology,
+                shared_tools=shared_tools,
+                control_tools=_string_set(
+                    raw_architecture.get("control_tools", []),
+                    "control_tools",
+                ),
+                delegation_edges={
+                    str(agent_id): _string_set(targets, f"delegation.{agent_id}")
+                    for agent_id, targets in (
+                        raw_architecture.get("delegation_edges")
+                        or raw_architecture.get("delegation", {}).get("edges", {})
+                    ).items()
+                },
+                declared_agent_count=(
+                    int(raw_architecture["agent_count"])
+                    if "agent_count" in raw_architecture
+                    else None
+                ),
             )
         )
 

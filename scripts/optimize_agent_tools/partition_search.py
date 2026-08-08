@@ -13,6 +13,7 @@ from optimize_agent_tools.replay_harness import (
     BASELINE_ARCHITECTURE_ID,
 )
 from optimize_agent_tools.telemetry_ingestion import (
+    CONTROL_PLANE_TOOLS,
     Session,
 )
 
@@ -30,8 +31,11 @@ class PartitionCandidate:
     """One generic architecture generated from the observed tool graph."""
 
     architecture_id: str
+    topology: str
     agent_tools: tuple[tuple[str, ...], ...]
-    parent_tools: tuple[str, ...]
+    exclusive_tools: tuple[tuple[str, ...], ...]
+    shared_tools: tuple[str, ...]
+    control_tools: tuple[str, ...]
     agent_definition_costs: tuple[float | None, ...]
     historical_activation_rates: tuple[float, ...]
     cross_agent_session_frequency: float
@@ -49,6 +53,11 @@ class PartitionCandidate:
     @property
     def agent_count(self) -> int:
         return len(self.agent_tools)
+
+    @property
+    def parent_tools(self) -> tuple[str, ...]:
+        """Compatibility view; peer candidates have no implicit parent."""
+        return ()
 
 
 @dataclass(frozen=True)
@@ -114,19 +123,29 @@ def _observed_surface(session: Session, exposure: BaselineExposure) -> set[str] 
     return set(exposure.exposed_tools)
 
 
-def _build_graph(sessions: list[Session], tools: frozenset[str]) -> _Graph:
+def _build_graph(
+    sessions: list[Session],
+    tools: frozenset[str],
+    excluded_tools: frozenset[str] = frozenset(),
+) -> _Graph:
     total_sessions = len(sessions)
     total_calls = sum(len(session.calls) for session in sessions)
     co_sessions: dict[tuple[str, str], int] = {}
     adjacency: dict[tuple[str, str], int] = {}
     for session in sessions:
-        session_tools = sorted(session.tool_set & tools)
+        session_tools = sorted((session.tool_set & tools) - excluded_tools)
         for index, left in enumerate(session_tools):
             for right in session_tools[index + 1 :]:
                 key = _pair_key(left, right)
                 co_sessions[key] = co_sessions.get(key, 0) + 1
         for left, right in zip(session.calls, session.calls[1:]):
-            if left != right and left in tools and right in tools:
+            if (
+                left != right
+                and left in tools
+                and right in tools
+                and left not in excluded_tools
+                and right not in excluded_tools
+            ):
                 key = _pair_key(left, right)
                 adjacency[key] = adjacency.get(key, 0) + 1
     weights = {
@@ -257,12 +276,57 @@ def _heuristic_partitions(
     return tuple(sorted(partitions, key=str))
 
 
+def _order_units_by_hints(
+    units: tuple[frozenset[str], ...], search_hints: Mapping[str, Any] | None
+) -> tuple[frozenset[str], ...]:
+    """Use soft NMF communities only as deterministic search ordering."""
+    communities = (search_hints or {}).get("strong_communities", ())
+    rankings: dict[str, int] = {}
+    for rank, community in enumerate(communities):
+        if not isinstance(community, Mapping):
+            continue
+        for tool in community.get("tools", ()):
+            rankings.setdefault(tool, rank)
+    return tuple(
+        sorted(
+            units,
+            key=lambda unit: (
+                min(
+                    (rankings.get(tool, len(communities)) for tool in unit),
+                    default=len(communities),
+                ),
+                tuple(sorted(unit)),
+            ),
+        )
+    )
+
+
 def _partition_tools(
     partition: tuple[tuple[frozenset[str], ...], ...],
 ) -> tuple[tuple[str, ...], ...]:
     return tuple(
         tuple(sorted(tool for unit in group for tool in unit)) for group in partition
     )
+
+
+def _shared_variants(
+    units: tuple[frozenset[str], ...], shared_seed: frozenset[str], limit: int
+) -> tuple[frozenset[str], ...]:
+    """Generate bounded sharing choices, keeping dependency units together."""
+    if not units:
+        return (frozenset(shared_seed),)
+    # Sharing is an independent choice dimension; cap it separately from the
+    # partition limit so a large corpus cannot multiply every partition by
+    # thousands of near-duplicate variants.
+    choice_count = min(1 << len(units), limit, 64)
+    choices = []
+    for mask in range(choice_count):
+        shared = set(shared_seed)
+        for index, unit in enumerate(units):
+            if mask & (1 << index):
+                shared.update(unit)
+        choices.append(frozenset(shared))
+    return tuple(choices)
 
 
 def _partition_edge_weight(
@@ -281,10 +345,10 @@ def _partition_edge_weight(
 
 def _is_dependency_closed(
     agent_tools: tuple[tuple[str, ...], ...],
-    parent_tools: frozenset[str],
+    shared_tools: frozenset[str],
     dependencies: Mapping[str, Iterable[str]],
 ) -> bool:
-    surface = parent_tools | frozenset(tool for tools in agent_tools for tool in tools)
+    surface = shared_tools | frozenset(tool for tools in agent_tools for tool in tools)
     ownership = {
         tool: index for index, tools in enumerate(agent_tools) for tool in tools
     }
@@ -296,6 +360,8 @@ def _is_dependency_closed(
                 tool in ownership
                 and dependency in ownership
                 and ownership[tool] != ownership[dependency]
+                and tool not in shared_tools
+                and dependency not in shared_tools
             ):
                 return False
     return True
@@ -304,7 +370,8 @@ def _is_dependency_closed(
 def _candidate_metrics(
     architecture_id: str,
     agent_tools: tuple[tuple[str, ...], ...],
-    parent_tools: frozenset[str],
+    shared_tools: frozenset[str],
+    control_tools: frozenset[str],
     sessions: list[Session],
     stats: Mapping[str, Any],
     retained_tools: frozenset[str],
@@ -328,7 +395,13 @@ def _candidate_metrics(
     context_before: list[float | None] = []
     context_after: list[float | None] = []
     for session in sessions:
-        called_agents = {ownership[tool] for tool in session.calls if tool in ownership}
+        called_agents = {
+            ownership[tool]
+            for tool in session.calls
+            if tool in ownership and tool not in control_tools
+        }
+        if not called_agents and len(agent_tools) == 1:
+            called_agents = {0}
         for index in called_agents:
             activation_counts[index] += 1
         if len(called_agents) > 1:
@@ -348,9 +421,8 @@ def _candidate_metrics(
             continue
         before_costs = [_cost(stats.get(tool)) for tool in surface & retained_tools]
         context_before.append(_sum_known(before_costs))
-        parent_costs = [_cost(stats.get(tool)) for tool in surface & parent_tools]
         active_costs = [costs[index] for index in called_agents]
-        context_after.append(_sum_known(parent_costs + active_costs))
+        context_after.append(_sum_known(active_costs))
 
     session_count = len(sessions)
     rates = tuple(
@@ -381,7 +453,12 @@ def _candidate_metrics(
     return PartitionCandidate(
         architecture_id=architecture_id,
         agent_tools=agent_tools,
-        parent_tools=tuple(sorted(parent_tools)),
+        topology="peer",
+        exclusive_tools=tuple(
+            tuple(sorted(set(tools) - shared_tools)) for tools in agent_tools
+        ),
+        shared_tools=tuple(sorted(shared_tools)),
+        control_tools=tuple(sorted(control_tools)),
         agent_definition_costs=costs,
         historical_activation_rates=rates,
         cross_agent_session_frequency=(
@@ -398,7 +475,7 @@ def _candidate_metrics(
         ),
         cross_agent_edge_weight=_partition_edge_weight(agent_tools, graph),
         dependency_closed=_is_dependency_closed(
-            agent_tools, parent_tools, dependencies
+            agent_tools, shared_tools, dependencies
         ),
         is_cost_complete=complete,
     )
@@ -439,6 +516,7 @@ def search_partitions(
     stats: Mapping[str, Any],
     required_tools: Iterable[str] | None = None,
     global_tools: Iterable[str] = (),
+    control_tools: Iterable[str] = CONTROL_PLANE_TOOLS,
     dependencies: Mapping[str, Iterable[str]] | None = None,
     max_agents: int = 3,
     communication_tokens_per_handoff: float = 0.0,
@@ -447,6 +525,7 @@ def search_partitions(
     max_partition_candidates: int = 5000,
     baseline_tools: Iterable[str] | None = None,
     exposure_model: str = "observed_only",
+    search_hints: Mapping[str, Any] | None = None,
 ) -> PartitionSearchResult:
     """Search generic, dependency-closed partitions and retain their Pareto frontier."""
     if max_agents < 1:
@@ -461,6 +540,7 @@ def search_partitions(
         for tool, values in (dependencies or {}).items()
     }
     global_set = _strings(global_tools, "global_tools")
+    control_set = _strings(control_tools, "control_tools")
     observed_tools = frozenset(
         tool for session in session_list for tool in session.tool_set
     )
@@ -472,6 +552,7 @@ def search_partitions(
     required_retained = _dependency_closure(roots, dependencies)
     global_surface = _dependency_closure(global_set, dependencies)
     retained = required_retained | global_surface
+    control_surface = _dependency_closure(control_set & retained, dependencies)
     baseline_surface = (
         _strings(baseline_tools, "baseline_tools")
         if baseline_tools is not None
@@ -479,38 +560,61 @@ def search_partitions(
     )
     if not global_surface <= retained:
         raise ValueError("Global tools must be retained tools.")
-    graph = _build_graph(session_list, retained)
-    units = _dependency_units(retained, dependencies, global_surface)
+    shared_seed = global_surface | control_surface
+    graph = _build_graph(session_list, retained, control_surface)
+    units = _dependency_units(retained, dependencies, shared_seed)
+    hinted_units = _order_units_by_hints(units, search_hints)
     all_candidates: list[PartitionCandidate] = []
     complete = True
     exhaustive = True
-    max_k = min(max_agents, len(units)) if units else (1 if retained else 0)
+    max_k = min(max_agents, len(hinted_units)) if hinted_units else (1 if retained else 0)
     for agent_count in range(1, max_k + 1):
-        estimated = _stirling_second_kind(len(units), agent_count)
-        if len(units) <= max_exhaustive_units and estimated <= max_partition_candidates:
-            partitions = tuple(_set_partitions(units, agent_count))
+        estimated = _stirling_second_kind(len(hinted_units), agent_count)
+        if len(hinted_units) <= max_exhaustive_units and estimated <= max_partition_candidates:
+            partitions = tuple(_set_partitions(hinted_units, agent_count))
         else:
             complete = False
             exhaustive = False
             partitions = _heuristic_partitions(
-                units, agent_count, graph, max_partition_candidates
+                hinted_units, agent_count, graph, max_partition_candidates
             )
         for index, partition in enumerate(partitions, start=1):
-            tools = _partition_tools(partition)
-            candidate = _candidate_metrics(
-                f"partition_k{agent_count:02d}_{index:04d}",
-                tools,
-                global_surface,
-                session_list,
-                stats,
-                retained,
-                graph,
-                dependencies,
-                delegation_tokens_per_activation,
-                communication_tokens_per_handoff,
-                exposure_model,
+            sharing_choices = (
+                (shared_seed,)
+                if agent_count == 1
+                else _shared_variants(hinted_units, shared_seed, max_partition_candidates)
             )
-            all_candidates.append(candidate)
+            for shared_index, shared in enumerate(sharing_choices, start=1):
+                exclusive_partition = tuple(
+                    tuple(unit for unit in group if not unit <= shared)
+                    for group in partition
+                )
+                exclusive_partition = tuple(
+                    group for group in exclusive_partition if group
+                )
+                if agent_count == 1 and not exclusive_partition:
+                    exclusive_partition = ((),)
+                if len(exclusive_partition) != agent_count:
+                    continue
+                exclusive_tools = _partition_tools(exclusive_partition)
+                tools = tuple(
+                    tuple(sorted(set(group) | set(shared))) for group in exclusive_tools
+                )
+                candidate = _candidate_metrics(
+                    f"partition_k{agent_count:02d}_{index:04d}_s{shared_index:04d}",
+                    tools,
+                    shared,
+                    control_surface,
+                    session_list,
+                    stats,
+                    retained,
+                    graph,
+                    dependencies,
+                    delegation_tokens_per_activation,
+                    communication_tokens_per_handoff,
+                    exposure_model,
+                )
+                all_candidates.append(candidate)
     frontier = _pareto(all_candidates)
     frontier_ids = {candidate.architecture_id for candidate in frontier}
     pareto_scope = "global" if exhaustive else "evaluated_subset"
@@ -528,16 +632,41 @@ def search_partitions(
     architectures: list[dict[str, Any]] = [
         {
             "architecture_id": BASELINE_ARCHITECTURE_ID,
+            "topology": "flat",
+            "agent_count": 1,
             "parent_tools": sorted(baseline_surface),
             "agents": {},
+            "control_tools": [],
         }
     ]
     architectures.extend(
         {
             "architecture_id": candidate.architecture_id,
-            "parent_tools": list(candidate.parent_tools),
+            "topology": candidate.topology,
+            "agent_count": candidate.agent_count,
+            "shared_tools": list(candidate.shared_tools),
+            "control_tools": list(candidate.control_tools),
+            "delegation": {
+                "enabled": candidate.agent_count > 1 and bool(candidate.control_tools),
+                "topology": " <-> ".join(
+                    f"agent_{index:02d}"
+                    for index in range(1, candidate.agent_count + 1)
+                ),
+                "edges": {
+                    f"agent_{index:02d}": [
+                        f"agent_{target:02d}"
+                        for target in range(1, candidate.agent_count + 1)
+                        if target != index
+                    ]
+                    for index in range(1, candidate.agent_count + 1)
+                },
+            },
             "agents": {
-                f"agent_{index:02d}": list(tools)
+                f"agent_{index:02d}": {
+                    "exclusive_tools": list(candidate.exclusive_tools[index - 1]),
+                    "shared_tools": list(candidate.shared_tools),
+                    "tools": list(tools),
+                }
                 for index, tools in enumerate(candidate.agent_tools, start=1)
             },
         }
@@ -562,7 +691,14 @@ def search_partitions(
             "pareto_scope": pareto_scope,
             "search_strategy": "exhaustive" if exhaustive else "bounded",
             "partition_units": [sorted(unit) for unit in units],
+            "search_units_before_nmf": len(units),
+            "search_units_after_nmf": len(hinted_units),
+            "nmf_search_effect": "ordering_only",
+            "nmf_unit_count_reduction": len(units) - len(hinted_units),
+            "nmf_hints_applied": bool(search_hints),
             "global_tools": sorted(global_surface),
+            "control_tools": sorted(control_surface),
+            "topology": "peer",
             "dependency_edges": {
                 tool: sorted(values) for tool, values in sorted(dependencies.items())
             },

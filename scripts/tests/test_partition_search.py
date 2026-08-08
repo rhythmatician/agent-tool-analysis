@@ -88,14 +88,14 @@ def test_normal_analysis_workflow_includes_generic_specialist_recommendation() -
     assert report["partition_search"]["search"]["max_agents"] == 2
 
 
-def test_incomplete_observed_only_frontier_uses_precise_recommendation_language() -> None:
+def test_incomplete_observed_only_frontier_uses_precise_recommendation_language() -> (
+    None
+):
     sessions = [
         Session("one", "codex", ["a"]),
         Session("two", "codex", ["b"]),
     ]
-    definitions = {
-        name: _definition(name, 10) for name in ("a", "b")
-    }
+    definitions = {name: _definition(name, 10) for name in ("a", "b")}
 
     report = analyze(
         sessions,
@@ -120,7 +120,9 @@ def test_incomplete_observed_only_frontier_uses_precise_recommendation_language(
 
     markdown = render_markdown(report)
     assert "Partition search: complete" in markdown
-    assert "Replay: not run; no cost-complete empirical finalist architectures" in markdown
+    assert (
+        "Replay: not run; no cost-complete empirical finalist architectures" in markdown
+    )
     assert "bounded fallback was used" not in markdown
 
 
@@ -128,12 +130,26 @@ def test_directional_structure_gets_provisional_best_guess() -> None:
     recommendation = classify_specialist_recommendation(
         pareto_candidates=[],
         candidate_agents=[
-            {"candidate_id": "cluster_01", "tools": ["github.read", "github.write"], "internal_affinity": 0.8},
-            {"candidate_id": "cluster_02", "tools": ["edit", "exec"], "internal_affinity": 0.7},
+            {
+                "candidate_id": "cluster_01",
+                "tools": ["github.read", "github.write"],
+                "internal_affinity": 0.8,
+            },
+            {
+                "candidate_id": "cluster_02",
+                "tools": ["edit", "exec"],
+                "internal_affinity": 0.7,
+            },
         ],
         directional_variants=[
-            {"variant_id": "cluster_01", "sensitivity": {"min_mid_reduction": 0.2, "max_mid_reduction": 0.5}},
-            {"variant_id": "cluster_02", "sensitivity": {"min_mid_reduction": 0.1, "max_mid_reduction": 0.3}},
+            {
+                "variant_id": "cluster_01",
+                "sensitivity": {"min_mid_reduction": 0.2, "max_mid_reduction": 0.5},
+            },
+            {
+                "variant_id": "cluster_02",
+                "sensitivity": {"min_mid_reduction": 0.1, "max_mid_reduction": 0.3},
+            },
         ],
         exposure_evidence_sufficient=False,
         cost_complete=False,
@@ -143,7 +159,7 @@ def test_directional_structure_gets_provisional_best_guess() -> None:
     assert recommendation["status"] == "provisional"
     assert recommendation["direction"] == "2-agent architecture"
     assert recommendation["confidence"] == "moderate-low"
-    assert recommendation["best_guess_architecture"] == "two_specialists"
+    assert recommendation["best_guess_architecture"] == "two_agents"
     assert "quality" in recommendation["required_validation"]
 
 
@@ -151,12 +167,26 @@ def test_zero_to_positive_counterfactual_range_remains_directional() -> None:
     recommendation = classify_specialist_recommendation(
         pareto_candidates=[],
         candidate_agents=[
-            {"candidate_id": "cluster_01", "tools": ["github.read", "github.write"], "internal_affinity": 0.8},
-            {"candidate_id": "cluster_02", "tools": ["exec", "send_message"], "internal_affinity": 0.7},
+            {
+                "candidate_id": "cluster_01",
+                "tools": ["github.read", "github.write"],
+                "internal_affinity": 0.8,
+            },
+            {
+                "candidate_id": "cluster_02",
+                "tools": ["exec", "send_message"],
+                "internal_affinity": 0.7,
+            },
         ],
         directional_variants=[
-            {"variant_id": "cluster_01", "sensitivity": {"min_mid_reduction": 0.0, "max_mid_reduction": 0.31}},
-            {"variant_id": "cluster_02", "sensitivity": {"min_mid_reduction": 0.0, "max_mid_reduction": 0.06}},
+            {
+                "variant_id": "cluster_01",
+                "sensitivity": {"min_mid_reduction": 0.0, "max_mid_reduction": 0.31},
+            },
+            {
+                "variant_id": "cluster_02",
+                "sensitivity": {"min_mid_reduction": 0.0, "max_mid_reduction": 0.06},
+            },
         ],
         exposure_evidence_sufficient=False,
         cost_complete=False,
@@ -165,19 +195,35 @@ def test_zero_to_positive_counterfactual_range_remains_directional() -> None:
 
     assert recommendation["status"] == "provisional"
     assert recommendation["direction"] == "2-agent architecture"
-    assert any("smallest multi-agent split" in reason for reason in recommendation["why"])
+    assert any(
+        "smallest multi-agent split" in reason for reason in recommendation["why"]
+    )
 
 
 def test_contradictory_directional_evidence_gets_no_recommendation() -> None:
     recommendation = classify_specialist_recommendation(
         pareto_candidates=[],
         candidate_agents=[
-            {"candidate_id": "cluster_01", "tools": ["a", "b"], "internal_affinity": 0.4},
-            {"candidate_id": "cluster_02", "tools": ["c", "d"], "internal_affinity": 0.4},
+            {
+                "candidate_id": "cluster_01",
+                "tools": ["a", "b"],
+                "internal_affinity": 0.4,
+            },
+            {
+                "candidate_id": "cluster_02",
+                "tools": ["c", "d"],
+                "internal_affinity": 0.4,
+            },
         ],
         directional_variants=[
-            {"variant_id": "cluster_01", "sensitivity": {"min_mid_reduction": -0.2, "max_mid_reduction": 0.2}},
-            {"variant_id": "cluster_02", "sensitivity": {"min_mid_reduction": -0.1, "max_mid_reduction": 0.1}},
+            {
+                "variant_id": "cluster_01",
+                "sensitivity": {"min_mid_reduction": -0.2, "max_mid_reduction": 0.2},
+            },
+            {
+                "variant_id": "cluster_02",
+                "sensitivity": {"min_mid_reduction": -0.1, "max_mid_reduction": 0.1},
+            },
         ],
         exposure_evidence_sufficient=False,
         cost_complete=False,
@@ -191,7 +237,11 @@ def test_contradictory_directional_evidence_gets_no_recommendation() -> None:
 def test_complete_evidence_without_quality_gate_is_still_provisional() -> None:
     recommendation = classify_specialist_recommendation(
         pareto_candidates=[
-            {"architecture_id": "partition_k02_0001", "agent_count": 2, "expected_context_cost_after_communication": 40.0}
+            {
+                "architecture_id": "partition_k02_0001",
+                "agent_count": 2,
+                "expected_context_cost_after_communication": 40.0,
+            }
         ],
         candidate_agents=[],
         directional_variants=[],
@@ -213,8 +263,16 @@ def test_directional_hypothesis_materializes_separately_from_pareto_frontier() -
     manifest_entry = materialize_provisional_architecture(
         recommendation=recommendation,
         candidate_agents=[
-            {"candidate_id": "cluster_01", "tools": ["a", "dep_a"], "internal_affinity": 0.8},
-            {"candidate_id": "cluster_02", "tools": ["b", "c"], "internal_affinity": 0.7},
+            {
+                "candidate_id": "cluster_01",
+                "tools": ["a", "dep_a"],
+                "internal_affinity": 0.8,
+            },
+            {
+                "candidate_id": "cluster_02",
+                "tools": ["b", "c"],
+                "internal_affinity": 0.7,
+            },
         ],
         directional_variants=[
             {"variant_id": "cluster_01", "sensitivity": {"max_mid_reduction": 0.4}},
@@ -227,15 +285,22 @@ def test_directional_hypothesis_materializes_separately_from_pareto_frontier() -
     )
 
     assert manifest_entry is not None
-    assert manifest_entry["architecture_id"] == "provisional_two_specialists"
+    assert manifest_entry["architecture_id"] == "provisional_two_agents"
     assert manifest_entry["provisional"] is True
     assert manifest_entry["directional_only"] is True
-    assert manifest_entry["parent_tools"] == ["shared"]
-    assert manifest_entry["agents"]["agent_01"] == ["a", "dep_a"]
-    assert manifest_entry["provenance"]["source"] == "directional_structure_and_sensitivity"
+    assert manifest_entry["topology"] == "peer"
+    assert manifest_entry["agent_count"] == 2
+    assert "parent_tools" not in manifest_entry
+    assert manifest_entry["agents"]["agent_01"]["exclusive_tools"] == ["a", "dep_a"]
+    assert (
+        manifest_entry["provenance"]["source"]
+        == "directional_structure_and_sensitivity"
+    )
 
 
-def test_provisional_analysis_exposes_baseline_and_concrete_two_specialist_option() -> None:
+def test_provisional_analysis_exposes_baseline_and_concrete_two_specialist_option() -> (
+    None
+):
     sessions = [
         Session(
             "one",
@@ -285,16 +350,19 @@ def test_provisional_analysis_exposes_baseline_and_concrete_two_specialist_optio
     options = report["architecture_options"]
     assert [option["architecture_id"] for option in options] == [
         "pruned_flat_baseline",
-        "provisional_two_specialists",
+        "provisional_two_agents",
     ]
     specialist = options[1]
     assert specialist["status"] == "provisional"
-    assert specialist["parent_tools"] == []
+    assert specialist["topology"] == "peer"
+    assert specialist["agent_count"] == 2
     assert len(specialist["agents"]) == 2
-    assert all(agent["semantic_status"] == "provisional" for agent in specialist["agents"])
+    assert all(
+        agent["semantic_status"] == "provisional" for agent in specialist["agents"]
+    )
     markdown = render_markdown(report)
     assert "Option 1 — Pruned single agent" in markdown
-    assert "Option 2 — Two specialists" in markdown
+    assert "Option 2 — Two cooperating agents" in markdown
     assert "optional advanced follow-up" in markdown
 
 
@@ -339,7 +407,11 @@ def test_architecture_options_keep_empirical_finalists_visible() -> None:
 def test_incomplete_evidence_does_not_label_a_cost_candidate_complete() -> None:
     recommendation = classify_specialist_recommendation(
         pareto_candidates=[
-            {"architecture_id": "partition_k02_0001", "agent_count": 2, "expected_context_cost_after_communication": 40.0}
+            {
+                "architecture_id": "partition_k02_0001",
+                "agent_count": 2,
+                "expected_context_cost_after_communication": 40.0,
+            }
         ],
         candidate_agents=[
             {"candidate_id": "cluster_01", "tools": ["a", "b"]},
@@ -385,29 +457,35 @@ def test_search_generates_closed_manifest_candidates_and_metrics() -> None:
     for architecture in result.manifest["architectures"]:
         if architecture["architecture_id"] == "pruned_flat_baseline":
             continue
-        assigned = set(architecture["parent_tools"])
+        assert architecture["topology"] == "peer"
+        assert architecture["agent_count"] == len(architecture["agents"])
+        assert "parent_tools" not in architecture
+        assigned = set(architecture["shared_tools"])
         assigned.update(
-            tool for tools in architecture["agents"].values() for tool in tools
+            tool for agent in architecture["agents"].values() for tool in agent["tools"]
         )
         assert set(result.manifest["historical_tool_capability_tools"]) <= assigned
-        assert architecture["parent_tools"] == ["shared"]
-        for tools in architecture["agents"].values():
-            if "a" in tools:
-                assert "dep_a" in tools
+        for agent in architecture["agents"].values():
+            if "a" in agent["tools"]:
+                assert "dep_a" in agent["tools"]
 
     candidate = next(
         candidate
         for candidate in result.all_candidates
         if candidate.agent_count == 2
-        and any(set(agent) == {"a", "b", "dep_a"} for agent in candidate.agent_tools)
+        and candidate.shared_tools == ("shared",)
+        and any(
+            set(agent) - {"shared"} == {"a", "b", "dep_a"}
+            for agent in candidate.agent_tools
+        )
     )
-    assert candidate.agent_definition_costs == (35.0, 30.0)
+    assert candidate.agent_definition_costs == (42.0, 37.0)
     assert candidate.historical_activation_rates == (2 / 3, 2 / 3)
     assert candidate.cross_agent_session_frequency == 1 / 3
     assert candidate.expected_handoff_count == 1 / 3
     assert candidate.expected_delegation_count == 1 / 3
     assert candidate.expected_context_cost_before_communication == 100 / 3
-    assert candidate.expected_context_cost_after_communication == 136 / 3
+    assert candidate.expected_context_cost_after_communication == 164 / 3
     assert candidate.dependency_closed is True
 
 
@@ -544,8 +622,8 @@ def test_global_tool_dependencies_stay_on_parent_surface() -> None:
     candidate = next(
         candidate for candidate in result.all_candidates if candidate.agent_count == 1
     )
-    assert candidate.parent_tools == ("shared", "shared_dep")
-    assert candidate.agent_tools == (("other",),)
+    assert candidate.shared_tools == ("shared", "shared_dep")
+    assert candidate.agent_tools == (("other", "shared", "shared_dep"),)
 
 
 def test_all_global_surface_still_emits_a_k_one_candidate() -> None:
@@ -558,7 +636,7 @@ def test_all_global_surface_still_emits_a_k_one_candidate() -> None:
     )
 
     assert [candidate.agent_count for candidate in result.all_candidates] == [1]
-    assert result.all_candidates[0].agent_tools == ((),)
+    assert result.all_candidates[0].agent_tools == (("shared",),)
     assert result.manifest["architectures"][0]["architecture_id"] == (
         "pruned_flat_baseline"
     )

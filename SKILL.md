@@ -1,11 +1,11 @@
 ---
 name: agent-tool-analysis
-description: Analyze coding-agent tool telemetry, remove dead tools, and recommend whether a simple specialist split beats one pruned agent.
+description: Analyze coding-agent tool telemetry, remove dead tools, and recommend whether simple peer agents beat one pruned agent.
 ---
 
 # Agent Tool Analysis
 
-Find actual tool usage, remove dead tools, compare a pruned flat agent with telemetry-grounded specialist candidates, and explain the simplest architecture worth considering.
+Find actual tool usage, remove dead tools, compare a pruned flat agent with telemetry-grounded peer architectures, and explain the simplest architecture worth considering.
 
 This skill is advisory. Do not modify agent configuration, MCP/plugin settings, or IDE settings unless the user explicitly asks for an apply step.
 
@@ -48,7 +48,7 @@ offline replay validation recorded separately:
 
 The normal command emits concrete `architecture_options` for the user. It
 always includes the dependency-closed `pruned_flat_baseline`, and adds the
-strongest concrete empirical finalist(s) or provisional specialist hypothesis
+  strongest concrete empirical finalist(s) or provisional peer-agent hypothesis
 when those are coherent.
 
 ## Host targeting
@@ -81,7 +81,7 @@ For the supported hosts in this environment:
   current workspace's `.github/agents/` directory for project-scoped
   definitions; use `~/.copilot/agents/` only when the user explicitly requests
   user scope. Include a meaningful `description` and the supported tool list
-  for each specialist.
+  for each actual agent.
 
 Create the destination directory when its parent workspace/profile is known
 and the destination is otherwise unambiguous. If the active host is unknown,
@@ -104,19 +104,21 @@ default response should:
   the option data rather than implying that anything has already been changed;
 - describe each option's simplicity, delegation, context, and coordination
   trade-offs;
-- give every specialist a useful provisional name and a real responsibility
+- give every agent a useful provisional name and a real responsibility
   derived only from its actual tool membership, never a raw cluster or
   candidate ID;
 - state a directional favorite when one exists, with confidence in ordinary
   language; and
 - end with a direct choice such as `Reply “1” for ... or “2” for ...`.
 
-For the common provisional two-specialist result, use this shape:
+For the common provisional two-agent result, use this shape:
 
 1. **One streamlined agent** — the retained tools on one agent, best for
    simplicity and no delegation overhead.
-2. **Two specialists — recommended, provisional** — two coherent working sets,
-   named by semantic responsibility, with shared tools called out separately.
+2. **Two cooperating agents — recommended, provisional** — two coherent
+  working sets, with explicitly duplicated shared tools and delegation called
+  out separately. This means two actual agents, not a parent plus two
+  peer agents.
 
 Explain limited confidence without exposing implementation fields. For
 example: “Some tool-definition and exposure measurements are incomplete, so
@@ -153,17 +155,17 @@ Then follow the matching evidence branch:
 - **Complete evidence:** if cost coverage and exposure evidence are sufficient,
   compare the pruned flat baseline with every reported cost-complete empirical
   Pareto candidate. For each candidate, turn its anonymous tool membership into
-  a **provisional** specialist name, one-sentence responsibility, and routing
-  rule. Base the explanation on tool families, shared parent tools, session
+  a **provisional** agent name, one-sentence responsibility, and routing
+  rule. Base the explanation on tool families, explicitly shared peer tools, session
   coverage, cross-agent frequency, and measured coordination costs. Mark names,
   responsibilities, and routes as semantic hypotheses rather than measured
   facts; retain multiple candidates when the trade-offs are genuinely Pareto.
 
-In either branch, explain what is retained, removed, grouped, or left on the
-parent, and stop after the advisory options until the user chooses one. A
-provisional two-agent result should be phrased as “two agents are the strongest
-current hypothesis,” not “the optimizer proved two agents are best.” Do not
-claim production superiority without validation.
+In either branch, explain what is retained, removed, grouped, or shared, and
+stop after the advisory options until the user chooses one. A provisional
+two-agent result should be phrased as “two agents are the strongest current
+hypothesis,” not “the optimizer proved two agents are best.” Do not claim
+production superiority without validation.
 
 ## Explicit architecture-choice branch
 
@@ -172,7 +174,8 @@ choice authorizes creation of new agent-definition files for the selected
 option. Do not send them to replay first. Enter the generation branch:
 
 1. Load the selected option from the architecture manifest and inspect its
-  actual parent, specialist, and shared-tool membership.
+  actual topology, agent count, exclusive, shared, and control-plane
+  membership.
 2. Detect the active host, resolve its supported agent format and default
   destination, and apply the host-targeting rules above.
 3. Infer each working set's semantic responsibility from the tool families and
@@ -190,11 +193,10 @@ option. Do not send them to replay first. Enter the generation branch:
   cannot be determined safely.
 
 For option 1, generate one streamlined definition with the retained tools. For
-option 2, keep the shared/orchestration tools on the host's primary parent and
-generate exactly one definition file per specialist. Do not create a separate
-parent definition unless the selected host explicitly requires one. Do not
-reuse `cluster_01`, `cluster_03`, or similar implementation identifiers as
-user-facing names.
+a peer option, `agent_count` is the exact number of actual definitions to
+create. Shared tools are duplicated capabilities on each peer, not tools on an
+implicit parent, and no parent definition is created. Do not reuse `cluster_01`,
+`cluster_03`, or similar implementation identifiers as user-facing names.
 
 When that provisional branch is selected, use its manifest membership to create
 the definitions; do not treat provisional status as a blocker. If the user
@@ -202,9 +204,27 @@ later asks for validation, use the replay workflow in `REPLAY.md`.
 
 ## Decision rule
 
+Architecture semantics are explicit: `agent_count` counts actual agents;
+`topology: peer` is the default partition topology; peer agents carry
+per-agent `exclusive_tools` and duplicated `shared_tools`; and a coordinator
+exists only when `topology: coordinator_specialists` is explicitly selected.
+Control-plane tools such as `spawn_agent`, `send_message`, and `wait_agent`
+are coordination capabilities, not workload affinity. Exclude them from
+semantic clustering while retaining their telemetry for delegation and
+communication cost estimates.
+
 The dependency-closed, dead-tool-pruned flat agent is the baseline to beat. Separate directly observed exposure, historical calls, inferred exposure, and unresolved exposure; missing evidence is not evidence of absence.
 
-Specialists are worth considering only when their context savings plausibly exceed delegation and communication overhead without losing historically required capabilities. Prefer a simpler split over a larger one when the benefit is similar. A pruned flat agent is a valid recommendation.
+Peer agents are worth considering only when duplicated shared context plus delegation and communication overhead plausibly beats the flat baseline without losing historically required capabilities. Prefer a simpler split over a larger one when the benefit is similar. A pruned flat agent is a valid recommendation.
+
+Host tool selectors are a separate translation problem. Never emit telemetry
+names directly into Copilot `tools:` entries. Resolve telemetry identity to a
+canonical capability and then to a verified host selector from local tool
+registry, MCP, extension, existing-agent, or provider evidence; never guess by
+changing punctuation. After generation, inspect diagnostics for
+`promptValidator.unknownExtensionReference`, attempt at most one evidence-based
+repair pass, validate once more, and report unresolved selectors. If selectors
+remain unresolved, do not claim that tool isolation is enforced.
 
 ## Escape hatches
 

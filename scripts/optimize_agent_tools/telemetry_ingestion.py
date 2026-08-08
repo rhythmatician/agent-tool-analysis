@@ -42,6 +42,73 @@ TOOL_NAME_REGEX = re.compile(
 )
 CODEX_CALL_TYPES = {"custom_tool_call", "function_call", "mcp_tool_call"}
 
+# Runtime control-plane tools describe delegation and coordination, not a
+# semantic workload. They remain available for coordination-cost analysis but
+# are excluded from workload affinity and partition clustering.
+CONTROL_PLANE_TOOLS = frozenset(
+    {
+        "followup_task",
+        "interrupt_agent",
+        "list_agents",
+        "send_message",
+        "spawn_agent",
+        "wait",
+        "wait_agent",
+    }
+)
+
+
+@dataclass(frozen=True)
+class ToolRoleRecord:
+    """Structural role evidence for one retained tool."""
+
+    tool: str
+    role: str
+    evidence: str
+    confidence: str = "high"
+
+
+# Exact runtime-native names only. Unknown tools deliberately remain domain;
+# role classification must not infer semantics from loose string fragments.
+_DELEGATION_TOOLS = frozenset({"followup_task", "spawn_agent"})
+_COORDINATION_TOOLS = frozenset(
+    {"interrupt_agent", "list_agents", "send_message", "wait", "wait_agent"}
+)
+_RUNTIME_INFRASTRUCTURE_TOOLS = frozenset(
+    {
+        "exec",
+        "run_in_terminal",
+        "execute/runTests",
+        "file_search",
+        "grep_search",
+        "semantic_search",
+        "read_file",
+        "create_file",
+        "apply_patch",
+        "get_errors",
+    }
+)
+
+
+def classify_tool_role(name: str) -> ToolRoleRecord:
+    if name in _DELEGATION_TOOLS:
+        return ToolRoleRecord(name, "delegation", "runtime_native_delegation", "high")
+    if name in _COORDINATION_TOOLS:
+        return ToolRoleRecord(name, "coordination", "runtime_native_coordination", "high")
+    if name in _RUNTIME_INFRASTRUCTURE_TOOLS:
+        return ToolRoleRecord(name, "runtime_infrastructure", "runtime_native_infrastructure", "high")
+    return ToolRoleRecord(name, "domain", "conservative_unknown_default", "low")
+
+
+def classify_tool_roles(names: Iterable[str]) -> dict[str, ToolRoleRecord]:
+    return {name: classify_tool_role(name) for name in sorted(set(names))}
+
+
+def tool_role(name: str) -> str:
+    """Compatibility role used by legacy clustering and partition code."""
+    record = classify_tool_role(name)
+    return "domain" if record.role == "domain" else "control_plane"
+
 
 @dataclass
 class DynamicToolGroup:

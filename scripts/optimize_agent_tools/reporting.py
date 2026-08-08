@@ -102,8 +102,9 @@ def render_markdown(report: dict[str, Any]) -> str:
                         f"### Option {index} — {option['label']}",
                         "",
                         f"- Architecture: `{option['architecture_id']}`",
+                        f"- Topology: `{option.get('topology', 'flat')}`; actual agents: {option.get('agent_count', 1)}",
                         f"- Status: `{option['status']}`",
-                        f"- Parent/shared tools: {format_tools(option['parent_tools'])}",
+                        f"- Shared tools: {format_tools(option.get('shared_tools', option.get('parent_tools', [])))}",
                         f"- Why choose this: {'; '.join(option['why_choose'])}",
                         f"- Tradeoffs: {'; '.join(option['tradeoffs'])}",
                         f"- Confidence: {option['confidence']}",
@@ -113,6 +114,7 @@ def render_markdown(report: dict[str, Any]) -> str:
                     lines.extend(
                         [
                             f"- {agent['name']} (`{agent['agent_id']}`): {format_tools(agent['tools'])}",
+                            f"  - Exclusive: {format_tools(agent.get('exclusive_tools', []))}; shared: {format_tools(agent.get('shared_tools', []))}",
                             f"  - Role: {agent['role']}",
                             f"  - Description: {agent['description']}",
                         ]
@@ -174,6 +176,28 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"- Retained baseline exact definition costs: {retained['tools_with_exact_cost']}/{retained['tools_total']}",
                 f"- Retained baseline cost status: `{retained['status']}`",
                 "- Calls are never used as exposure evidence; recovered chars/4 costs remain estimates.",
+                "",
+            ]
+        )
+
+    nmf = report.get("nmf_screening")
+    if nmf:
+        hints = nmf.get("search_hints", {})
+        lines.extend(
+            [
+                "## NMF workload screening",
+                "",
+                "NMF factors are screening signals, not agents or irreversible ownership assignments.",
+                f"- Domain matrix: {nmf.get('matrix', {}).get('rows', 0)} sessions × {nmf.get('matrix', {}).get('columns', 0)} tools ({nmf.get('matrix', {}).get('mode', 'unknown')})",
+                f"- Delegation/coordination tools excluded from the domain matrix: {nmf.get('control_plane', {}).get('control_plane_tool_count', 0)}",
+                f"- Runtime-infrastructure tools excluded from the domain matrix: {nmf.get('control_plane', {}).get('runtime_infrastructure_tool_count', 0)}",
+                f"- Factor counts evaluated: {format_tools(nmf.get('factor_counts', []))}",
+                f"- Selected screening factor count: {nmf.get('selected_factor_count', 'none')} (not final agent count)",
+                f"- Plausible factor counts: {format_tools(hints.get('plausible_factor_counts', []))}",
+                f"- Strong communities: {'; '.join(format_tools(item.get('tools', [])) for item in hints.get('strong_communities', [])) or 'none'}",
+                f"- Ambiguous/cross-loading tools: {format_tools(hints.get('ambiguous_tools', []))}",
+                f"- Shared candidates: {format_tools(hints.get('shared_candidates', []))}",
+                f"- Search units: {len(hints.get('search_units', []))} soft units; partition search remains authoritative and currently uses them for ordering only",
                 "",
             ]
         )
@@ -248,7 +272,7 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"- Usage-weighted cost coverage: {coverage['calls_with_known_cost']}/{coverage['total_calls']} ({coverage['usage_weighted_coverage_rate']:.1%})",
             f"- Exposure-record cost coverage: {coverage['exposure_weighted_coverage_rate']:.1%}",
             f"- Flat baseline known definition tokens: {overhead['flat_baseline_known_tokens']:.1f}",
-            f"- Parent known definition tokens after partition: {overhead['parent_known_tokens_after_partition']:.1f}",
+            f"- Unassigned known definition tokens after partition: {overhead.get('unassigned_known_tokens_after_partition', overhead.get('parent_known_tokens_after_partition', 0.0)):.1f}",
             f"- Expected known tokens/session after partition: {overhead['expected_known_tokens_per_session_after_partition']:.1f}",
             f"- Expected known-token savings/session: {_number(overhead['expected_known_tokens_saved_per_session'])}",
             f"- Delegation overhead assumption: {overhead['delegation_overhead_tokens_per_activated_specialist']} tokens per activated specialist",
@@ -514,8 +538,7 @@ def print_summary(
             for option in report.get("architecture_options", [])
         ]
         print(
-            "Architecture options: "
-            + (", ".join(option_ids) if option_ids else "none")
+            "Architecture options: " + (", ".join(option_ids) if option_ids else "none")
         )
     coverage = overhead["known_cost_coverage"]
     print(
@@ -531,4 +554,6 @@ def print_summary(
     print(f"Markdown report: {markdown_path.resolve()}")
     if manifest_path is not None:
         print(f"Architecture manifest: {manifest_path.resolve()}")
-    print("\nNext: inspect the architecture options in the Markdown report; replay is optional advanced validation.")
+    print(
+        "\nNext: inspect the architecture options in the Markdown report; replay is optional advanced validation."
+    )
