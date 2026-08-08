@@ -549,6 +549,10 @@ def test_search_generates_closed_manifest_candidates_and_metrics() -> None:
         "c",
         "dep_a",
     ]
+    assert all(
+        architecture["dependencies"] == {"a": ["dep_a"]}
+        for architecture in result.manifest["architectures"]
+    )
 
     for architecture in result.manifest["architectures"]:
         if architecture["architecture_id"] == "pruned_flat_baseline":
