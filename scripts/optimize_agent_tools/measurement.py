@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+from .runtime_metrics import from_surface_run
+
 
 @dataclass(frozen=True)
 class ExperimentIdentity:
@@ -251,6 +253,7 @@ def _run_record(run: SurfaceRun) -> dict[str, Any]:
         "task_success": run.task_success,
         "quality_score": run.quality_score,
         "latency_seconds": run.latency_seconds,
+        "runtime_metrics": from_surface_run(run).to_record(),
     }
 
 

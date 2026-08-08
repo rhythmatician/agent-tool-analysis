@@ -1,0 +1,55 @@
+# Runtime-aware metric contract (v0.3)
+
+`runtime_metrics.py` is the host-neutral evidence contract for controlled
+measurements and recorded replay. It is an adapter boundary: existing replay
+and measurement inputs remain compatible, while reports can use one vocabulary
+without pretending that missing fields were measured.
+
+## Required dimensions
+
+Every result keeps these dimensions separate:
+
+| Dimension | Required fields | Rule |
+| --- | --- | --- |
+| Definition loading | configured, loaded, deferred, selected definitions | Configured is what the architecture permits; loaded is what the host actually supplied; deferred is retrievable but not loaded. Do not infer loaded definitions from calls. |
+| Token accounting | total input, cached input, uncached input, billed input, output | Cached and uncached are distinct. Uncached input is derived only when total and cached input are both reported. Billed input is provider-reported billing input, not a synonym for uncached input. |
+| Context occupancy | tool/schema, task/context, total | Schema occupancy must not be folded into task/context occupancy. Unknown splits remain unknown. |
+| Selection | selected count, selection failures, routing failures, missed and unnecessary activations, ambiguity | Selection quality describes choosing or activating capabilities. It does not include delegation or message cost. |
+| Coordination | delegation tokens, inter-agent communication tokens, activations, handoffs, turns, latency | Coordination is reported separately and may be compared with selection outcomes, but is never silently added to them. |
+| Outcome and coverage | success, quality, observed replay coverage, historical coverage | Historical manifest coverage and observed replay coverage are different evidence. |
+
+## Evidence rules
+
+Each value is a `Metric` with `MetricEvidence` metadata:
+
+- `measured`: directly reported by the controlled host or replay executor;
+- `estimated`: calculated from an explicit estimation method and inputs;
+- `inferred`: derived from evidence but not directly reported (for example,
+  uncached input = total input − cached input);
+- `counterfactual`: projected for an architecture or exposure that did not run;
+- `unavailable`: the host did not report the value;
+- `unresolved`: the value is expected but its source or interpretation is not
+  established.
+
+Evidence includes source, method, unit, and optional runtime/model identity.
+`None` is permitted only with `unavailable` or `unresolved` evidence. Consumers
+must not turn unavailable values into zeroes, token estimates, monetary savings,
+or production-quality claims.
+
+## Adapter boundaries
+
+- `from_surface_run()` maps `SurfaceRun` and marks host fields that it cannot
+  observe as unavailable.
+- `from_replay_observation()` maps `ReplayObservation` and keeps routing and
+  coordination fields separate from tool selection.
+- `from_replay_aggregate()` serializes aggregate replay results with the same
+  evidence vocabulary.
+- Telemetry and definition registries remain historical/provenance adapters;
+  they are not runtime measurements.
+- Architecture manifests remain topology and membership inputs.
+- Recommendation policy remains responsible for the strict baseline gate and
+  for preserving a valid “do nothing” result.
+
+A comparison may claim a measured token or quality delta only when both sides
+have compatible measured evidence. Estimates and counterfactuals remain
+explicitly labelled in reports.
