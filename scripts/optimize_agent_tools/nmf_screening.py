@@ -79,7 +79,6 @@ def _validate_config(config: NMFConfig) -> None:
 def _matrix(
     sessions: Sequence[EvidenceSession], tools: Sequence[str]
 ) -> list[list[float]]:
-    tool_set = set(tools)
     return [
         [1.0 if tool in session.tool_set else 0.0 for tool in tools]
         for session in sessions
@@ -280,18 +279,36 @@ def run_nmf_screening(
     config = config or NMFConfig()
     _validate_config(config)
     session_list = [session for session in sessions if session.called_tools]
-    tools = tuple(sorted(set(domain_tools)))
+    tools = tuple(
+        sorted(
+            tool
+            for tool in set(domain_tools)
+            if role_records.get(tool) is None
+            or role_records[tool].role == "domain"
+        )
+    )
     control = _control_summary(session_list, role_records)
+    matrix_rows = _matrix(session_list, tools) if tools else []
+    matrix_sessions = [
+        session.session_id for session in session_list if session.called_tools
+    ]
     if not tools or not session_list:
         return NMFScreening(
             "no_matrix",
             config.__dict__,
-            {"rows": len(session_list), "columns": len(tools), "mode": config.matrix_mode, "tools": list(tools)},
+            {
+                "rows": len(matrix_rows),
+                "columns": len(tools),
+                "mode": config.matrix_mode,
+                "session_ids": matrix_sessions if tools else [],
+                "tools": list(tools),
+                "values": matrix_rows,
+            },
             (), (), None,
             {"strong_communities": [], "ambiguous_tools": [], "shared_candidates": [], "plausible_factor_counts": [], "search_units": []},
             control,
         )
-    matrix = _matrix(session_list, tools)
+    matrix = matrix_rows
     max_rank = min(config.max_factors, len(tools), len(matrix))
     counts = tuple(range(1, max_rank + 1))
     evaluations: list[dict[str, Any]] = []
@@ -352,7 +369,14 @@ def run_nmf_screening(
     return NMFScreening(
         "complete",
         config.__dict__,
-        {"rows": len(matrix), "columns": len(tools), "mode": config.matrix_mode, "tools": list(tools)},
+        {
+            "rows": len(matrix),
+            "columns": len(tools),
+            "mode": config.matrix_mode,
+            "session_ids": matrix_sessions,
+            "tools": list(tools),
+            "values": matrix,
+        },
         counts,
         tuple(evaluations),
         selected,
