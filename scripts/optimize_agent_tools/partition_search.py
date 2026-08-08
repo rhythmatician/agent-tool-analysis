@@ -37,6 +37,7 @@ class PartitionCandidate:
     agent_tools: tuple[tuple[str, ...], ...]
     exclusive_tools: tuple[tuple[str, ...], ...]
     shared_tools: tuple[str, ...]
+    placement_strategy: str
     control_tools: tuple[str, ...]
     agent_definition_costs: tuple[float | None, ...]
     historical_activation_rates: tuple[float, ...]
@@ -354,22 +355,16 @@ def _partition_tools(
 
 def _shared_variants(
     units: tuple[frozenset[str], ...], shared_seed: frozenset[str], limit: int
-) -> tuple[frozenset[str], ...]:
-    """Generate bounded sharing choices, keeping dependency units together."""
+) -> tuple[tuple[frozenset[str], str], ...]:
+    """Return interpretable exclusive and duplicated shared-all placements."""
+    del limit
+    exclusive = frozenset(shared_seed)
     if not units:
-        return (frozenset(shared_seed),)
-    # Sharing is an independent choice dimension; cap it separately from the
-    # partition limit so a large corpus cannot multiply every partition by
-    # thousands of near-duplicate variants.
-    choice_count = min(1 << len(units), limit, 64)
-    choices = []
-    for mask in range(choice_count):
-        shared = set(shared_seed)
-        for index, unit in enumerate(units):
-            if mask & (1 << index):
-                shared.update(unit)
-        choices.append(frozenset(shared))
-    return tuple(choices)
+        return ((exclusive, "exclusive"),)
+    shared_all = exclusive | frozenset().union(*units)
+    if shared_all == exclusive:
+        return ((exclusive, "exclusive"),)
+    return ((exclusive, "exclusive"), (shared_all, "shared_all"))
 
 
 def _partition_edge_weight(
@@ -423,12 +418,16 @@ def _candidate_metrics(
     delegation_tokens: float,
     communication_tokens: float,
     exposure_model: str,
+    placement_strategy: str,
 ) -> PartitionCandidate:
     costs: tuple[float | None, ...] = tuple(
         _sum_known(_cost(stats.get(tool)) for tool in tools) for tools in agent_tools
     )
     ownership = {
-        tool: index for index, tools in enumerate(agent_tools) for tool in tools
+        tool: index
+        for index, tools in enumerate(agent_tools)
+        for tool in tools
+        if tool not in shared_tools
     }
     activation_counts = [0] * len(agent_tools)
     cross_sessions = 0
@@ -443,6 +442,11 @@ def _candidate_metrics(
             for tool in session.called_tools
             if tool in ownership and tool not in control_tools
         }
+        if any(
+            tool in shared_tools and tool not in control_tools
+            for tool in session.called_tools
+        ):
+            called_agents.add(0)
         if not called_agents and len(agent_tools) == 1:
             called_agents = {0}
         for index in called_agents:
@@ -450,7 +454,9 @@ def _candidate_metrics(
         if len(called_agents) > 1:
             cross_sessions += 1
         ordered_agents = [
-            ownership[tool] for tool in session.called_tools if tool in ownership
+            ownership.get(tool, 0)
+            for tool in session.called_tools
+            if tool in ownership or tool in shared_tools
         ]
         handoffs += sum(
             left != right for left, right in zip(ordered_agents, ordered_agents[1:])
@@ -501,6 +507,7 @@ def _candidate_metrics(
             tuple(sorted(set(tools) - shared_tools)) for tools in agent_tools
         ),
         shared_tools=tuple(sorted(shared_tools)),
+        placement_strategy=placement_strategy,
         control_tools=tuple(sorted(control_tools)),
         agent_definition_costs=costs,
         historical_activation_rates=rates,
@@ -633,17 +640,16 @@ def search_partitions(
                 )
             for index, partition in enumerate(partitions, start=1):
                 sharing_choices = (
-                    (shared_seed,)
+                    ((shared_seed, "exclusive"),)
                     if agent_count == 1
                     else _shared_variants(stage_units, shared_seed, max_partition_candidates)
                 )
-                for shared_index, shared in enumerate(sharing_choices, start=1):
+                for shared_index, (shared, placement_strategy) in enumerate(
+                    sharing_choices, start=1
+                ):
                     exclusive_partition = tuple(
                         tuple(unit for unit in group if not unit <= shared)
                         for group in partition
-                    )
-                    exclusive_partition = tuple(
-                        group for group in exclusive_partition if group
                     )
                     if agent_count == 1 and not exclusive_partition:
                         exclusive_partition = ((),)
@@ -666,6 +672,7 @@ def search_partitions(
                         delegation_tokens_per_activation,
                         communication_tokens_per_handoff,
                         exposure_model,
+                        placement_strategy,
                     )
                     all_candidates.append(candidate)
     frontier = _pareto(all_candidates)
@@ -702,6 +709,7 @@ def search_partitions(
             "architecture_id": candidate.architecture_id,
             "topology": candidate.topology,
             "agent_count": candidate.agent_count,
+            "placement_strategy": candidate.placement_strategy,
             "shared_tools": list(candidate.shared_tools),
             "control_tools": list(candidate.control_tools),
             "dependencies": {

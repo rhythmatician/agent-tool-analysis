@@ -18,7 +18,12 @@ The pure `search_partitions()` API accepts:
 - delegation and inter-agent communication token assumptions.
 
 Dependencies are expanded transitively and dependency-connected tools are kept
-in the same partition unit. Explicit global tools remain on the parent surface.
+in the same partition unit. Explicit global tools are retained in the flat
+baseline and duplicated across the actual peer agents.
+For peer candidates, placement starts with two interpretable choices: keep
+non-global units exclusive to one agent, or duplicate the complete retained
+surface across every agent (`shared_all`). Arbitrary partial sharing is not
+searched until those choices have been compared.
 The search is staged: dependency units are the hard-lock baseline, strong NMF
 communities combine those units into breakable soft units for the initial search,
 and refinement searches the original dependency units again so a soft grouping
@@ -39,6 +44,8 @@ Each candidate reports:
 - expected ordered handoff count from observed call sequences;
 - expected context cost before communication overhead;
 - expected context cost after delegation and communication overhead.
+- placement strategy (`exclusive` or `shared_all`), with shared tools assigned
+  to every actual peer agent rather than an implicit parent.
 
 The Pareto dimensions are context cost after overhead, maximum agent definition
 cost, cross-agent session frequency, handoff count, and agent count. Every

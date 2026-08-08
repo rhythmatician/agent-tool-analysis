@@ -34,6 +34,7 @@ class BenchmarkArchitecture:
     parent_tools: frozenset[str]
     agent_tools: Mapping[str, frozenset[str]] = field(default_factory=dict)
     topology: str = "coordinator_specialists"
+    placement_strategy: str | None = None
     shared_tools: Mapping[str, frozenset[str]] = field(default_factory=dict)
     control_tools: frozenset[str] = frozenset()
     delegation_edges: Mapping[str, frozenset[str]] = field(default_factory=dict)
@@ -51,6 +52,11 @@ class BenchmarkArchitecture:
             raise ValueError("Agent IDs must be non-empty.")
         if self.topology not in {"flat", "peer", "coordinator_specialists"}:
             raise ValueError(f"Unsupported architecture topology: {self.topology}")
+        if self.placement_strategy not in {None, "exclusive", "shared_all"}:
+            raise ValueError(
+                "Unsupported placement strategy: "
+                f"{self.placement_strategy}"
+            )
         if (
             self.declared_agent_count is not None
             and self.declared_agent_count != self.agent_count
@@ -253,6 +259,11 @@ def build_architecture_manifest(raw: Mapping[str, Any]) -> ArchitectureManifest:
                 ),
                 agent_tools=agents,
                 topology=topology,
+                placement_strategy=(
+                    str(raw_architecture["placement_strategy"])
+                    if "placement_strategy" in raw_architecture
+                    else None
+                ),
                 shared_tools=shared_tools,
                 control_tools=_string_set(
                     raw_architecture.get("control_tools", []),
@@ -345,6 +356,8 @@ def serialize_architecture_manifest(manifest: ArchitectureManifest) -> dict[str,
                 for tool, dependencies in sorted(architecture.dependencies.items())
             },
         }
+        if architecture.placement_strategy is not None:
+            entry["placement_strategy"] = architecture.placement_strategy
         if topology != "peer":
             entry["parent_tools"] = sorted(architecture.parent_tools)
         else:
