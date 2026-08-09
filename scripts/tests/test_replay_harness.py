@@ -169,9 +169,7 @@ def test_peer_effective_tools_include_reachable_delegated_capabilities() -> None
             "file_agent": {"tools": ["file_tool"], "shared_tools": []},
         },
         "shared_tools": {"review_agent": [], "file_agent": []},
-        "delegation": {
-            "edges": {"review_agent": ["file_agent"], "file_agent": []}
-        },
+        "delegation": {"edges": {"review_agent": ["file_agent"], "file_agent": []}},
     }
     architecture = build_architecture_manifest(raw).architectures[1]
 
@@ -193,9 +191,7 @@ def test_capability_coverage_distinguishes_direct_reachable_and_unavailable() ->
             "file_agent": {"tools": ["file_tool"], "shared_tools": []},
         },
         "shared_tools": {"review_agent": [], "file_agent": []},
-        "delegation": {
-            "edges": {"review_agent": ["file_agent"], "file_agent": []}
-        },
+        "delegation": {"edges": {"review_agent": ["file_agent"], "file_agent": []}},
     }
     architecture = build_architecture_manifest(raw).architectures[1]
 
@@ -221,9 +217,7 @@ def test_manifest_rejects_dependencies_that_are_not_colocated() -> None:
         },
         "shared_tools": {"review_agent": [], "file_agent": []},
         "dependencies": {"review_tool": ["file_tool"]},
-        "delegation": {
-            "edges": {"review_agent": ["file_agent"], "file_agent": []}
-        },
+        "delegation": {"edges": {"review_agent": ["file_agent"], "file_agent": []}},
     }
 
     with pytest.raises(ValueError, match="colocated"):
@@ -427,9 +421,10 @@ def test_report_evaluates_every_manifest_architecture_without_hard_coded_ids() -
 
     assert set(report["architectures"]) == {BASELINE_ARCHITECTURE_ID, "two_agents"}
     assert set(report["comparisons"]) == {"two_agents"}
-    assert report["benchmark"]["manifest"]["architectures"]["two_agents"][
-        "agent_count"
-    ] == 3
+    assert (
+        report["benchmark"]["manifest"]["architectures"]["two_agents"]["agent_count"]
+        == 3
+    )
     assert report["architectures"]["two_agents"]["agent_count"] == 3
     assert report["architectures"]["two_agents"]["inter_agent_handoffs"] == 1
     assert report["architectures"]["two_agents"]["orchestration_tokens"] == 11

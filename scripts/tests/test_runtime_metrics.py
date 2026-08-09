@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import pytest
-from optimize_agent_tools.measurement import ExperimentIdentity, SurfaceCondition, SurfaceRun
+from optimize_agent_tools.measurement import (
+    ExperimentIdentity,
+    SurfaceCondition,
+    SurfaceRun,
+)
 from optimize_agent_tools.replay_harness import ReplayObservation
 from optimize_agent_tools.runtime_metrics import (
     Metric,
