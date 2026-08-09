@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Iterable, Mapping
 
 from .runtime_metrics import RuntimeMetrics
+from .runtime_exposure import RuntimeExposureCapabilities
 
 ALTERNATIVE_IDS = (
     "do_nothing",
@@ -104,8 +105,11 @@ def build_alternative_plans(
     current_architecture_id: str = "current_runtime_configuration",
     dynamic_retrieval_supported: bool | None = None,
     hybrid_supported: bool | None = None,
+    runtime_exposure: RuntimeExposureCapabilities | None = None,
 ) -> tuple[AlternativePlan, ...]:
     """Construct the fixed normalized alternative set without ranking it."""
+    if dynamic_retrieval_supported is None and runtime_exposure is not None:
+        dynamic_retrieval_supported = runtime_exposure.dynamic_retrieval_supported
     topology_ids = _topology_architecture_ids(manifest)
     baseline_id = str(manifest.get("baseline_architecture_id", "pruned_flat_baseline"))
     static_ids = [
@@ -321,6 +325,7 @@ def build_runtime_alternatives_report(
     current_architecture_id: str = "current_runtime_configuration",
     dynamic_retrieval_supported: bool | None = None,
     hybrid_supported: bool | None = None,
+    runtime_exposure: RuntimeExposureCapabilities | None = None,
 ) -> list[dict[str, Any]]:
     """Build the stable alternatives table consumed by reports and callers."""
     plans = build_alternative_plans(
@@ -328,6 +333,7 @@ def build_runtime_alternatives_report(
         current_architecture_id=current_architecture_id,
         dynamic_retrieval_supported=dynamic_retrieval_supported,
         hybrid_supported=hybrid_supported,
+        runtime_exposure=runtime_exposure,
     )
     return [
         evaluation.to_record()

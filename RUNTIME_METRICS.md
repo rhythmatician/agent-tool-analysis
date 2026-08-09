@@ -38,6 +38,11 @@ or production-quality claims.
 
 ## Adapter boundaries
 
+- `runtime_exposure.py` describes host facts independently from measurements.
+  Facts use `known`, `inferred`, `unsupported`, or `unknown` status; unknown
+  support must remain unknown rather than becoming a runtime default. The
+  contract covers tool-search support and activation, MCP defer policies,
+  custom-agent behavior, caching, and observability.
 - `from_surface_run()` maps `SurfaceRun` and marks host fields that it cannot
   observe as unavailable.
 - `from_replay_observation()` maps `ReplayObservation` and keeps routing and
@@ -63,6 +68,11 @@ runtime as `do_nothing`, followed by `prune_only`, `streamlined_static`,
 the support boundary, lists runtime requirements and assumptions, and carries
 metric evidence status for loading, tokens, occupancy, selection,
 coordination, and outcomes.
+
+`RuntimeExposureCapabilities` can be supplied to alternative construction.
+This lets an adapter establish dynamic-retrieval support without coupling host
+configuration to the recommendation core. It does not infer loaded definitions
+from configured or called tools.
 
 This layer evaluates alternatives but does not choose a winner. A missing
 runtime measurement is reported as unavailable, not as zero or evidence that a
