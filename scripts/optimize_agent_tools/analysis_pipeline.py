@@ -51,6 +51,7 @@ from .runtime_recommendation import (
     RecommendationThresholds,
     recommend_runtime_alternatives,
 )
+from .runtime_exposure import RuntimeExposureCapabilities
 from .telemetry_ingestion import (
     Session,
     classify_tool_roles,
@@ -1888,6 +1889,7 @@ def _run_analysis(
     exposure_model: str = "observed_only",
     runtime_metrics_by_alternative: Mapping[str, RuntimeMetrics] | None = None,
     runtime_recommendation_thresholds: RecommendationThresholds | None = None,
+    runtime_exposure: RuntimeExposureCapabilities | None = None,
 ) -> AnalysisWorkflowResult:
     if max_agents < 1:
         raise ValueError("max_agents must be at least 1.")
@@ -2222,6 +2224,7 @@ def _run_analysis(
     runtime_alternatives = build_runtime_alternatives_report(
         manifest=manifest,
         metrics_by_alternative=runtime_metrics_by_alternative,
+        runtime_exposure=runtime_exposure,
     )
     runtime_recommendation = recommend_runtime_alternatives(
         runtime_alternatives,
@@ -2300,6 +2303,9 @@ def _run_analysis(
             "architecture_options": architecture_options,
             "runtime_alternatives": runtime_alternatives,
             "runtime_recommendation": runtime_recommendation,
+            "runtime_exposure": (
+                runtime_exposure.to_record() if runtime_exposure is not None else None
+            ),
             "partition_search": partition_result.report,
             "topology_discovery": topology_discovery,
             "specialist_recommendation": {
@@ -2398,6 +2404,7 @@ def analyze(
     exposure_model: str = "observed_only",
     runtime_metrics_by_alternative: Mapping[str, RuntimeMetrics] | None = None,
     runtime_recommendation_thresholds: RecommendationThresholds | None = None,
+    runtime_exposure: RuntimeExposureCapabilities | None = None,
 ) -> dict[str, Any]:
     """Run the analysis workflow and return its stable serialized report."""
 
@@ -2425,5 +2432,6 @@ def analyze(
         exposure_model=exposure_model,
         runtime_metrics_by_alternative=runtime_metrics_by_alternative,
         runtime_recommendation_thresholds=runtime_recommendation_thresholds,
+        runtime_exposure=runtime_exposure,
     )
     return result.serialize()
