@@ -99,6 +99,16 @@ or ambiguous, or the destination cannot be resolved, ask one concise question:
 
 Do not ask about replay at this point.
 
+## HITL nucleus design (permanent step - before specialist search)
+
+After the first `python -m optimize_agent_tools` run and Markdown review, and before proposing specialists:
+
+1. Show the optimizer's auto-detected shared nucleus (`global_tools` at `--global-usage-threshold 0.35`, mention `0.60` if different) and its collapsed families (canonical `read` `copilot_readFile+read_file 0.93`, `findText 0.79`, `findFiles 0.60`, `edit 1.0`, `exec 0.88`, `errors 0.45` etc), plus clustering hint: coherent specialists have `int>ext` and `marg>0` (e.g. Excel `int 0.56 ext 0.47`), while file/edit/search leaks `ext>int, marg<0`. Flag that `file/edit/search` + `terminal` + `errors` and coordination `agent/send_message/wait` are domain-invariant core that telemetry splits across aliases, so raw `usage_rate` under-reports them; do not leave them as specialist exclusives.
+2. Propose the corrected nucleus (typically 16-22 tools: core 7 + `read_file/grep_search/file_search/list_dir` + `copilot_applyPatch/createFile/multiReplaceString/getErrors` + `get_errors/get_changed_files/get_terminal_output` + `agent/send_message/wait`) and ask the user to confirm/edit it: what else should be shared so no specialist must delegate for core work? Note over-sharing closes `flat vs max_peer` gap, under-sharing forces delegation on every file operation - invite judgement on that trade. Example: "I'll put file/edit/search, terminal, errors in the shared nucleus so neither peer delegates for core. OK, or adjust?"
+3. Once approved, re-materialize `provisional_peer.json` / `architecture_manifest.provisional.json` with that nucleus duplicated on every peer, then move to the specialist question below. Record the approved nucleus and its rationale (collapsed urs, `ext>int` evidence) in the provisional's `assumptions.nucleus_source`.
+
+Then, *given the nucleus and proximal clustering around the nucleus, which specialist agents would be good?* Validate against expected splits (e.g. in this user's history GitHub `fetch_webpage/github-pull-request_*` and Jupyter `copilot_createNewJupyterNotebook/editNotebook/runNotebookCell` should separate - GitLab notebooks vs GitHub - not co-locate).
+
 ## Default user-facing response
 
 The normal response is a decision aid, not an implementation or telemetry
