@@ -1,3 +1,5 @@
+from collections.abc import Mapping
+
 from optimize_agent_tools.host_selector_resolution import (
     CapabilityBinding,
     SelectorEvidence,
@@ -6,6 +8,7 @@ from optimize_agent_tools.host_selector_resolution import (
     resolve_host_selectors,
     resolve_telemetry_selectors,
     unknown_extension_references,
+    unknown_extension_references_from_json,
     validate_generated_selectors,
     validate_host_realization,
 )
@@ -47,6 +50,90 @@ def test_unknown_reference_repair_is_exact_and_bounded() -> None:
     )
     assert repaired.isolation_enforced is True
     assert repaired.selectors["github.create_issue"] == "github.create_issue"
+
+
+def test_unknown_references_from_structured_diagnostics_match_text_path() -> None:
+    payload = {
+        "schemaVersion": 1,
+        "files": [
+            {
+                "uri": "file:///workspace/.github/agents/github.agent.md",
+                "diagnostics": [
+                    {
+                        "source": "promptValidator",
+                        "code": "unknownExtensionOrMcpServerReference",
+                        "message": "Unknown tool 'github.create_issue' will be ignored.",
+                        "range": {
+                            "start": {"line": 3, "character": 4},
+                            "end": {"line": 3, "character": 25},
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+
+    assert unknown_extension_references_from_json(payload) == ("github.create_issue",)
+
+
+def test_unknown_references_from_structured_diagnostics_merge_files_and_deduplicate() -> (
+    None
+):
+    payload = {
+        "schemaVersion": 1,
+        "files": [
+            {
+                "uri": "file:///workspace/first.agent.md",
+                "diagnostics": [
+                    {"message": "Unknown tool 'github.create_issue' will be ignored."},
+                    {"message": "Unknown tool 'github.create_issue' will be ignored."},
+                ],
+            },
+            {
+                "uri": "file:///workspace/second.agent.md",
+                "diagnostics": [
+                    {"message": "Unknown tool 'playwright.navigate' will be ignored."}
+                ],
+            },
+        ],
+    }
+
+    assert unknown_extension_references_from_json(payload) == (
+        "github.create_issue",
+        "playwright.navigate",
+    )
+
+
+def test_unknown_references_from_structured_diagnostics_accept_empty_export() -> None:
+    assert (
+        unknown_extension_references_from_json({"schemaVersion": 1, "files": []}) == ()
+    )
+
+
+def test_unknown_references_from_structured_diagnostics_reject_malformed_envelope() -> (
+    None
+):
+    malformed_payloads = [
+        {},
+        {"schemaVersion": 2, "files": []},
+        {"schemaVersion": 1, "files": [{"uri": "file:///workspace/a.agent.md"}]},
+        {
+            "schemaVersion": 1,
+            "files": [
+                {
+                    "uri": "file:///workspace/a.agent.md",
+                    "diagnostics": [{"message": None}],
+                }
+            ],
+        },
+    ]
+
+    for payload in malformed_payloads:
+        try:
+            unknown_extension_references_from_json(payload)
+        except ValueError:
+            continue
+        raise AssertionError("malformed prompt diagnostics payload was accepted")
 
 
 def test_telemetry_identity_resolves_to_canonical_capability_and_selector() -> None:
@@ -192,7 +279,7 @@ def test_generated_selector_validation_retries_once_after_exact_repair() -> None
     )
     calls: list[dict[str, str]] = []
 
-    def generate(selectors: dict[str, str]) -> list[str]:
+    def generate(selectors: Mapping[str, str]) -> list[str]:
         calls.append(dict(selectors))
         return (
             ["promptValidator.unknownExtensionReference: 'github.create_issue'"]

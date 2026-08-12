@@ -8,11 +8,13 @@ files or retry a host more than once.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping as MappingABC
 from dataclasses import dataclass
 from typing import Callable, Iterable, Mapping
 
 _UNKNOWN_REFERENCE = re.compile(
-    r"(?:unknownExtensionReference|unknown extension reference)[^'\"]*['\"]([^'\"]+)['\"]",
+    r"(?:unknownExtensionReference|unknownExtensionOrMcpServerReference|"
+    r"unknown extension reference|Unknown tool)[^'\"]*['\"]([^'\"]+)['\"]",
     re.IGNORECASE,
 )
 _VERIFIED_SOURCES = {
@@ -258,6 +260,55 @@ def unknown_extension_references(diagnostics: Iterable[str]) -> tuple[str, ...]:
     for diagnostic in diagnostics:
         references.update(_UNKNOWN_REFERENCE.findall(diagnostic))
     return tuple(sorted(references))
+
+
+def unknown_extension_references_from_json(
+    payload: Mapping[str, object],
+) -> tuple[str, ...]:
+    """Extract unknown selectors from a prompt-diagnostics bridge payload.
+
+    The bridge is intentionally a transport boundary: validate the required
+    envelope here, then reuse the legacy message parser so text and structured
+    diagnostics have identical selector semantics.
+    """
+    if not isinstance(payload, MappingABC):
+        raise ValueError("prompt diagnostics payload must be an object")
+    if payload.get("schemaVersion") != 1:
+        raise ValueError("unsupported or missing prompt diagnostics schemaVersion")
+
+    files = payload.get("files")
+    if not isinstance(files, list):
+        raise ValueError("prompt diagnostics payload must contain a files array")
+
+    messages: list[str] = []
+    for file_index, file_record in enumerate(files):
+        if not isinstance(file_record, MappingABC):
+            raise ValueError(
+                f"prompt diagnostics files[{file_index}] must be an object"
+            )
+        uri = file_record.get("uri")
+        if not isinstance(uri, str) or not uri:
+            raise ValueError(f"prompt diagnostics files[{file_index}] requires a uri")
+        diagnostics = file_record.get("diagnostics")
+        if not isinstance(diagnostics, list):
+            raise ValueError(
+                f"prompt diagnostics files[{file_index}] must contain a diagnostics array"
+            )
+        for diagnostic_index, diagnostic in enumerate(diagnostics):
+            if not isinstance(diagnostic, MappingABC):
+                raise ValueError(
+                    "prompt diagnostics "
+                    f"files[{file_index}].diagnostics[{diagnostic_index}] must be an object"
+                )
+            message = diagnostic.get("message")
+            if not isinstance(message, str):
+                raise ValueError(
+                    "prompt diagnostics "
+                    f"files[{file_index}].diagnostics[{diagnostic_index}] requires a message"
+                )
+            messages.append(message)
+
+    return unknown_extension_references(messages)
 
 
 def bounded_selector_repair(

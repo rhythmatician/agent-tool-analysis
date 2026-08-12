@@ -227,6 +227,90 @@ When that provisional branch is selected, use its manifest membership to create
 the definitions; do not treat provisional status as a blocker. If the user
 later asks for validation, use the replay workflow in `REPLAY.md`.
 
+## Prompt validation (permanent step — after generating `.agent.md` files)
+
+For every generated Copilot `.agent.md` file, run the Chat Customizations
+Evaluations analyzer and iterate until clean:
+
+For programmatic consumption, an optional companion VS Code extension can
+export the live diagnostic snapshot through `vscode.languages.getDiagnostics`
+as the versioned JSON contract in
+[`docs/prompt-validator-diagnostics.schema.json`](docs/prompt-validator-diagnostics.schema.json).
+See [`docs/prompt-validator-protocol.md`](docs/prompt-validator-protocol.md)
+for the producer workflow and freshness rules. The JSON bridge is a transport
+for editor diagnostics; it does not make the internal `promptValidator`
+service public and it must not treat a stale snapshot as a clean validation.
+
+1. Run the VS Code command `chatCustomizationsEvaluations.analyzePrompt` with
+   the file's absolute path as its argument. Repeat for each generated file.
+2. Read the file's diagnostics from the Problems panel (via the error-reading
+  tool), or consume a bridge export with
+  `unknown_extension_references_from_json()` when structured output is
+  available. Do not rely on a single read immediately after analysis; if a
+  finding looks stale after an edit, verify with a file search before
+  re-acting on it. The text path remains the portable fallback.
+3. Fix actionable findings with focused edits. Common validator findings seen
+   in practice, and how to resolve them:
+   - **Ambiguous delegation boundary** — when the prompt lists shared core
+     tools (file/terminal/errors) but says "delegate anything outside X," the
+     model can't tell when to self-handle. Fix: scope the shared tools
+     ("use shared workspace tools only in direct support of a <specialty>
+     task") and define delegation by *task goal*, not tool usage ("delegate
+     when the task requires code refactoring or feature implementation not
+     directly tied to <specialty>").
+   - **Coverage gap / no failure handling** — add concrete failure guidance
+     ("if the action fails, capture a screenshot and terminal output, then
+     report the error before retrying or delegating").
+   - **Duplicate tools with different naming conventions** — resolve each
+     selector against the active host registry and keep only the exact
+     verified form. Do not retain telemetry IDs or stale aliases merely to
+     preserve historical spelling.
+   - **Self-doubting provenance footer** — never write "provisional /
+     semantic hypothesis / not measured facts" into the operational prompt.
+     Keep that rationale in `provisional_peer.json` or a separate metadata
+     file; operational prompts must be assertive.
+4. Re-run the analyzer after each fix pass (at most one repair pass per the
+   host-realization rule; more rounds indicate a structural problem, not a
+   wording problem).
+5. Report each file as validated-clean or list remaining findings. Do not
+   claim the agents are ready until every file has no diagnostics.
+
+**Selector ground truth (verified against validator source):**
+`promptValidator.unknownExtensionOrMcpServerReference` on nearly every entry
+means the tool list was written in telemetry IDs, not host selectors. The
+validator checks `languageModelToolsService.getFullReferenceNames()`
+(`workbench.desktop.main.js`). Valid selector forms, verified by reading that
+source and iterating against the live validator:
+
+1. **VS Code core toolsets** — namespaced `set/tool` names found as literals
+   in the workbench bundle: `read/readFile`, `read/getNotebookSummary`,
+   `search/fileSearch`, `search/textSearch`, `edit/editFiles`,
+   `edit/createFile`, `edit/createDirectory`, `edit/createJupyterNotebook`,
+   `edit/editNotebook`. Deprecated short names produce
+   `Tool or toolset 'x' has been renamed, use 'u/x' instead` diagnostics —
+   always apply the suggested rename.
+2. **MCP servers** — server wildcards: `github/*`, `playwright/*`
+   (aliases in `githubMCPServerAliases`/`playwrightMCPServerAliases`). Do NOT
+   enumerate individual `mcp_github_*` tools — the wildcard covers them.
+3. **Extension-registered tools** — bare keys as they appear in the
+   copilot-chat registry
+   (`%APPDATA%/Code/User/globalStorage/github.copilot-chat/toolEmbeddings.json`),
+   e.g. `configure_python_environment`, `install_python_packages`,
+   `notebook_install_packages`, `manage_todo_list`.
+
+Invalid on this host: telemetry tool ids (`copilot_readFile` in session logs
+is an id, not a selector), `copilot_*` package.json `name` fields (selector
+is the sibling `toolReferenceName`, and even those short names like
+`readFile` are deprecated in favor of the namespaced core set above), bare
+codex names (`read_file`, `run_in_terminal`, `apply_patch`), and stale host
+variants (`navigate_page`, `click_element`).
+
+Resolution order: validator rename diagnostics (ground truth, apply
+directly) → namespaced core set in workbench bundle → `github/*`/`playwright/*`
+wildcards → `toolEmbeddings.json` keys for extension tools. When the editor
+shows live squiggles the agent cannot see, ask the user for the exact
+offending name and its suggested replacement — each one maps a family.
+
 ## Decision rule
 
 Architecture semantics are explicit: `agent_count` counts actual agents;
