@@ -215,6 +215,9 @@ def normalize_tool_name(raw_name: str | None) -> str | None:
     clean_name = raw_name.strip(" \"'")
     if clean_name.startswith("runSubagent-"):
         return "agent"
+    # Collapse ephemeral per-turn IDs (Codex dynamic tools, ChatCompletion) to stable buckets
+    if clean_name.startswith("call_MH") or clean_name.startswith("call-") or clean_name.startswith("toolu_") or clean_name.startswith("chatcmpl"):
+        return "dynamic_tool"
     clean_name = TOOL_REMAP.get(clean_name, clean_name)
     return None if IGNORE_REGEX.search(clean_name) else clean_name
 
