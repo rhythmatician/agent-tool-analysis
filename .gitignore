@@ -1,4 +1,5 @@
 .vscode/settings.json
+.vscode/prompt-diagnostics.json
 graphify-out/
 tmp/
 tmp_*

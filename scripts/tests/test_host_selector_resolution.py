@@ -52,6 +52,15 @@ def test_unknown_reference_repair_is_exact_and_bounded() -> None:
     assert repaired.selectors["github.create_issue"] == "github.create_issue"
 
 
+def test_unknown_references_accept_missing_mcp_server_alias_diagnostics() -> None:
+    diagnostics = [
+        "Tool alias 'playwright/*' requires the Playwright MCP server.",
+        "Tool alias 'github/*' requires the GitHub MCP server.",
+    ]
+
+    assert unknown_extension_references(diagnostics) == ("github/*", "playwright/*")
+
+
 def test_unknown_references_from_structured_diagnostics_match_text_path() -> None:
     payload = {
         "schemaVersion": 1,

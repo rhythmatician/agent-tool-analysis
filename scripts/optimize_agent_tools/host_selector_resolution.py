@@ -14,7 +14,7 @@ from typing import Callable, Iterable, Mapping
 
 _UNKNOWN_REFERENCE = re.compile(
     r"(?:unknownExtensionReference|unknownExtensionOrMcpServerReference|"
-    r"unknown extension reference|Unknown tool)[^'\"]*['\"]([^'\"]+)['\"]",
+    r"unknown extension reference|Unknown tool|Tool alias)[^'\"]*['\"]([^'\"]+)['\"]",
     re.IGNORECASE,
 )
 _VERIFIED_SOURCES = {

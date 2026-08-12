@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Diagnostic, Uri } from "vscode";
+import { isAgentDocument } from "../src/agentFiles";
 import { buildDiagnosticExport } from "../src/diagnosticExport";
 
 function uri(value: string): Uri {
-  return { toString: () => value } as Uri;
+  return { path: value, toString: () => value } as Uri;
 }
 
 function diagnostic(message: string, line: number): Diagnostic {
@@ -80,4 +81,10 @@ test("buildDiagnosticExport represents a clean file with no diagnostics", () => 
   );
 
   assert.equal(result.files[0]?.diagnostics.length, 0);
+});
+
+test("isAgentDocument recognizes agent prompt files case-insensitively", () => {
+  assert.equal(isAgentDocument(uri("file:///workspace/.github/agents/tool.agent.md")), true);
+  assert.equal(isAgentDocument(uri("file:///workspace/README.md")), false);
+  assert.equal(isAgentDocument(uri("file:///workspace/agent.md.bak")), false);
 });

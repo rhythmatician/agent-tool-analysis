@@ -245,21 +245,20 @@ service public and it must not treat a stale snapshot as a clean validation.
   export. From `vscode-prompt-validator/`, run `npm install` and `npm test`,
   then press `F5` in that folder to launch an Extension Development Host, or
   run `npm run package` and install the resulting VSIX in the target VS Code
-  profile.
-2. In the target workspace, save or otherwise revalidate the generated files,
-  then run **Prompt Validator: Export Diagnostics as JSON**. This creates
-  `.vscode/prompt-diagnostics.json`. The command exports a snapshot; its
-  timestamp does not prove that validation just ran.
-3. Run the VS Code command `chatCustomizationsEvaluations.analyzePrompt` with
+  profile. Once enabled, it automatically writes
+  `.vscode/prompt-diagnostics.json` on startup and when diagnostics change.
+2. Run the VS Code command `chatCustomizationsEvaluations.analyzePrompt` with
    the file's absolute path as its argument. Repeat for each generated file.
-4. Read the file's diagnostics from the Problems panel (via the error-reading
-  tool), or consume a bridge export with
-  `unknown_extension_references_from_json()` when structured output is
-  available. Do not rely on a single read immediately after analysis; if a
-  finding looks stale after an edit, verify with a file search before
-  re-acting on it. The text path remains the portable fallback.
-5. Fix actionable findings with focused edits. Common validator findings seen
-   in practice, and how to resolve them:
+3. Read the automatically refreshed file's diagnostics with
+  `unknown_extension_references_from_json()`. If the export is absent or its
+  `generatedAt` predates the edit, run **Prompt Validator: Export Diagnostics
+  as JSON** as a manual refresh, then use the Problems-panel text path (via
+  the error-reading tool) as the portable fallback. The timestamp is an export
+  time, not proof that validation just ran.
+4. Fix actionable findings with focused edits. Do not rely on a single read
+  immediately after analysis; if a finding looks stale after an edit, verify
+  with a file search before re-acting on it. Common validator findings seen
+  in practice, and how to resolve them:
    - **Ambiguous delegation boundary** — when the prompt lists shared core
      tools (file/terminal/errors) but says "delegate anything outside X," the
      model can't tell when to self-handle. Fix: scope the shared tools

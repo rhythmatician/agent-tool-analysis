@@ -1,6 +1,6 @@
 # Prompt Validator Diagnostics Protocol
 
-This repository can consume a structured snapshot of diagnostics from the VS Code prompt validator. The producer is an optional companion VS Code extension; `promptValidator` is an internal diagnostic source, not a public MCP server or standalone CLI.
+This repository can consume a structured snapshot of diagnostics from the VS Code prompt validator. The producer is the companion VS Code extension in `vscode-prompt-validator/`; `promptValidator` is an internal diagnostic source, not a public MCP server or standalone CLI.
 
 ## Purpose
 
@@ -46,15 +46,16 @@ A clean export is represented by an empty `diagnostics` array. An export with no
 
 ## Producer workflow
 
-The companion extension should:
+The companion extension:
 
-1. Select workspace `.agent.md` files explicitly.
-2. Read diagnostics for each file URI through `vscode.languages.getDiagnostics(uri)`.
-3. Preserve the diagnostic source, code, message, severity, and zero-based range when present.
-4. Sort file records by URI and diagnostics by range, then message, for deterministic output.
-5. Write `.vscode/prompt-diagnostics.json` or provide the same payload through a future transport.
+1. Activates on VS Code startup and selects workspace `.agent.md` files explicitly.
+2. Reads diagnostics for each file URI through `vscode.languages.getDiagnostics(uri)`.
+3. Automatically refreshes after diagnostic changes with a short debounce; the export command remains available for manual refresh.
+4. Preserves the diagnostic source, code, message, severity, and zero-based range when present.
+5. Sorts file records by URI and diagnostics by range, then message, for deterministic output.
+6. Writes `.vscode/prompt-diagnostics.json` or provides the same payload through a future transport.
 
-The first implementation should export a workspace artifact. An MCP or stdout adapter can be added later without changing the diagnostic collection or schema.
+An MCP or stdout adapter can be added later without changing the diagnostic collection or schema.
 
 ## Consumer workflow
 

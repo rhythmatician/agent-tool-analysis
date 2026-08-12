@@ -2,7 +2,7 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "https://github.com/rhythmatician/agent-tool-analysis/docs/prompt-validator-diagnostics.schema.json",
     "title": "Prompt Validator Diagnostics Export",
-    "description": "Versioned diagnostics exported by the optional VS Code prompt-validator bridge.",
+    "description": "Versioned diagnostics exported by the VS Code prompt-validator companion extension.",
     "type": "object",
     "required": [
         "schemaVersion",
