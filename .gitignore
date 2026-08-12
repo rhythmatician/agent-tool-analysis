@@ -1,3 +1,4 @@
 .vscode/settings.json
 graphify-out/
 tmp/
+tmp_*
