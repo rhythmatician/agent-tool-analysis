@@ -2,3 +2,5 @@
 graphify-out/
 tmp/
 tmp_*
+agent_tool_analysis/
+.agents
