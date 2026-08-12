@@ -1,0 +1,42 @@
+{
+    "name": "vscode-prompt-validator-diagnostics",
+    "displayName": "Prompt Validator Diagnostics",
+    "description": "Export VS Code prompt customization diagnostics as structured JSON.",
+    "version": "0.1.0",
+    "publisher": "rhythmatician",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/rhythmatician/agent-tool-analysis"
+    },
+    "engines": {
+        "vscode": "^1.90.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "main": "./out/src/extension.js",
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "contributes": {
+        "commands": [
+            {
+                "command": "promptValidatorDiagnostics.exportJson",
+                "title": "Prompt Validator: Export Diagnostics as JSON"
+            }
+        ]
+    },
+    "scripts": {
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "test": "npm run compile && node --test out/test/*.test.js",
+        "package": "npm run compile && vsce package"
+    },
+    "devDependencies": {
+        "@types/node": "^22.0.0",
+        "@types/vscode": "^1.90.0",
+        "typescript": "^5.5.0",
+        "@vscode/vsce": "^3.2.1"
+    }
+}

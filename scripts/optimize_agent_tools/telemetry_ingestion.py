@@ -215,6 +215,9 @@ def normalize_tool_name(raw_name: str | None) -> str | None:
     clean_name = raw_name.strip(" \"'")
     if clean_name.startswith("runSubagent-"):
         return "agent"
+    # Collapse ephemeral per-turn IDs (Codex dynamic tools, ChatCompletion) to stable buckets
+    if clean_name.startswith("call_MH") or clean_name.startswith("call-") or clean_name.startswith("toolu_") or clean_name.startswith("chatcmpl"):
+        return "dynamic_tool"
     clean_name = TOOL_REMAP.get(clean_name, clean_name)
     return None if IGNORE_REGEX.search(clean_name) else clean_name
 
@@ -438,10 +441,28 @@ def get_vscode_sessions(
     definitions: dict[str, DefinitionRecord] = {}
     if not os.path.exists(workspace_storage):
         return sessions, definitions
-    pattern = os.path.join(
-        workspace_storage, "*", "github.copilot-chat", "debug-logs", "*", "*.jsonl"
-    )
-    for file_path in glob.glob(pattern, recursive=True):
+    # Collect VS Code / Copilot Chat sessions from all known storage locations:
+    # - legacy debug-logs (one JSON object per line)
+    # - modern chatSessions NDJSON (incremental kind/k/v patches, uses toolId/toolName)
+    # - transcripts (GitHub.copilot-chat/transcripts)
+    patterns = [
+        os.path.join(workspace_storage, "*", "github.copilot-chat", "debug-logs", "*", "*.jsonl"),
+        os.path.join(workspace_storage, "*", "GitHub.copilot-chat", "debug-logs", "*", "*.jsonl"),
+        os.path.join(workspace_storage, "*", "chatSessions", "*.jsonl"),
+        os.path.join(workspace_storage, "*", "GitHub.copilot-chat", "transcripts", "*.jsonl"),
+        os.path.join(workspace_storage, "*", "github.copilot-chat", "transcripts", "*.jsonl"),
+    ]
+    _COPILOT_TOOL_RE = re.compile(r'"(?:toolId|toolName)"\s*:\s*"([^"]+)"')
+    seen: set[str] = set()
+    file_paths: list[str] = []
+    for pattern in patterns:
+        for fp in glob.glob(pattern, recursive=True):
+            if fp not in seen:
+                seen.add(fp)
+                file_paths.append(fp)
+    # Backwards-compat alias
+    pattern = patterns[0]
+    for file_path in file_paths:
         calls: list[str] = []
         observed_at: datetime | None = None
         try:
@@ -452,6 +473,11 @@ def get_vscode_sessions(
                     for match in TOOL_NAME_REGEX.findall(line):
                         if name := normalize_tool_name(match[0] or match[1]):
                             calls.append(name)
+                    # Copilot chatSessions/transcripts: capture toolId/toolName (modern schema)
+                    for raw in _COPILOT_TOOL_RE.findall(line):
+                        if name := normalize_tool_name(raw):
+                            if not calls or calls[-1] != name:
+                                calls.append(name)
                     try:
                         event = json.loads(line)
                     except json.JSONDecodeError:

@@ -99,6 +99,16 @@ or ambiguous, or the destination cannot be resolved, ask one concise question:
 
 Do not ask about replay at this point.
 
+## HITL nucleus design (permanent step - before specialist search)
+
+After the first `python -m optimize_agent_tools` run and Markdown review, and before proposing specialists:
+
+1. Show the optimizer's auto-detected shared nucleus (`global_tools` at `--global-usage-threshold 0.35`, mention `0.60` if different) and its collapsed families (canonical `read` `copilot_readFile+read_file 0.93`, `findText 0.79`, `findFiles 0.60`, `edit 1.0`, `exec 0.88`, `errors 0.45` etc), plus clustering hint: coherent specialists have `int>ext` and `marg>0` (e.g. Excel `int 0.56 ext 0.47`), while file/edit/search leaks `ext>int, marg<0`. Flag that `file/edit/search` + `terminal` + `errors` and coordination `agent/send_message/wait` are domain-invariant core that telemetry splits across aliases, so raw `usage_rate` under-reports them; do not leave them as specialist exclusives.
+2. Propose the corrected nucleus (typically 16-22 tools: core 7 + `read_file/grep_search/file_search/list_dir` + `copilot_applyPatch/createFile/multiReplaceString/getErrors` + `get_errors/get_changed_files/get_terminal_output` + `agent/send_message/wait`) and ask the user to confirm/edit it: what else should be shared so no specialist must delegate for core work? Note over-sharing closes `flat vs max_peer` gap, under-sharing forces delegation on every file operation - invite judgement on that trade. Example: "I'll put file/edit/search, terminal, errors in the shared nucleus so neither peer delegates for core. OK, or adjust?"
+3. Once approved, re-materialize `provisional_peer.json` / `architecture_manifest.provisional.json` with that nucleus duplicated on every peer, then move to the specialist question below. Record the approved nucleus and its rationale (collapsed urs, `ext>int` evidence) in the provisional's `assumptions.nucleus_source`.
+
+Then, *given the nucleus and proximal clustering around the nucleus, which specialist agents would be good?* Validate against expected splits (e.g. in this user's history GitHub `fetch_webpage/github-pull-request_*` and Jupyter `copilot_createNewJupyterNotebook/editNotebook/runNotebookCell` should separate - GitLab notebooks vs GitHub - not co-locate).
+
 ## Default user-facing response
 
 The normal response is a decision aid, not an implementation or telemetry
@@ -216,6 +226,98 @@ implicit parent, and no parent definition is created. Do not reuse `cluster_01`,
 When that provisional branch is selected, use its manifest membership to create
 the definitions; do not treat provisional status as a blocker. If the user
 later asks for validation, use the replay workflow in `REPLAY.md`.
+
+## Prompt validation (permanent step — after generating `.agent.md` files)
+
+For every generated Copilot `.agent.md` file, run the Chat Customizations
+Evaluations analyzer and iterate until clean:
+
+For programmatic consumption, the companion extension in
+`vscode-prompt-validator/` exports the current diagnostic snapshot through
+`vscode.languages.getDiagnostics` as the versioned JSON contract in
+[`docs/prompt-validator-diagnostics.schema.json`](docs/prompt-validator-diagnostics.schema.json).
+See [`docs/prompt-validator-protocol.md`](docs/prompt-validator-protocol.md)
+for the producer workflow and freshness rules. The JSON bridge is a transport
+for editor diagnostics; it does not make the internal `promptValidator`
+service public and it must not treat a stale snapshot as a clean validation.
+
+1. Build and enable the companion extension before expecting a structured
+  export. From `vscode-prompt-validator/`, run `npm install` and `npm test`,
+  then press `F5` in that folder to launch an Extension Development Host, or
+  run `npm run package` and install the resulting VSIX in the target VS Code
+  profile. Once enabled, it automatically writes
+  `.vscode/prompt-diagnostics.json` on startup and when diagnostics change.
+2. Run the VS Code command `chatCustomizationsEvaluations.analyzePrompt` with
+   the file's absolute path as its argument. Repeat for each generated file.
+3. Read the automatically refreshed file's diagnostics with
+  `unknown_extension_references_from_json()`. If the export is absent or its
+  `generatedAt` predates the edit, run **Prompt Validator: Export Diagnostics
+  as JSON** as a manual refresh, then use the Problems-panel text path (via
+  the error-reading tool) as the portable fallback. The timestamp is an export
+  time, not proof that validation just ran.
+4. Fix actionable findings with focused edits. Do not rely on a single read
+  immediately after analysis; if a finding looks stale after an edit, verify
+  with a file search before re-acting on it. Common validator findings seen
+  in practice, and how to resolve them:
+   - **Ambiguous delegation boundary** — when the prompt lists shared core
+     tools (file/terminal/errors) but says "delegate anything outside X," the
+     model can't tell when to self-handle. Fix: scope the shared tools
+     ("use shared workspace tools only in direct support of a <specialty>
+     task") and define delegation by *task goal*, not tool usage ("delegate
+     when the task requires code refactoring or feature implementation not
+     directly tied to <specialty>").
+   - **Coverage gap / no failure handling** — add concrete failure guidance
+     ("if the action fails, capture a screenshot and terminal output, then
+     report the error before retrying or delegating").
+   - **Duplicate tools with different naming conventions** — resolve each
+     selector against the active host registry and keep only the exact
+     verified form. Do not retain telemetry IDs or stale aliases merely to
+     preserve historical spelling.
+   - **Self-doubting provenance footer** — never write "provisional /
+     semantic hypothesis / not measured facts" into the operational prompt.
+     Keep that rationale in `provisional_peer.json` or a separate metadata
+     file; operational prompts must be assertive.
+4. Re-run the analyzer after each fix pass (at most one repair pass per the
+   host-realization rule; more rounds indicate a structural problem, not a
+   wording problem).
+5. Report each file as validated-clean or list remaining findings. Do not
+   claim the agents are ready until every file has no diagnostics.
+
+**Selector ground truth (verified against validator source):**
+`promptValidator.unknownExtensionOrMcpServerReference` on nearly every entry
+means the tool list was written in telemetry IDs, not host selectors. The
+validator checks `languageModelToolsService.getFullReferenceNames()`
+(`workbench.desktop.main.js`). Valid selector forms, verified by reading that
+source and iterating against the live validator:
+
+1. **VS Code core toolsets** — namespaced `set/tool` names found as literals
+   in the workbench bundle: `read/readFile`, `read/getNotebookSummary`,
+   `search/fileSearch`, `search/textSearch`, `edit/editFiles`,
+   `edit/createFile`, `edit/createDirectory`, `edit/createJupyterNotebook`,
+   `edit/editNotebook`. Deprecated short names produce
+   `Tool or toolset 'x' has been renamed, use 'u/x' instead` diagnostics —
+   always apply the suggested rename.
+2. **MCP servers** — server wildcards: `github/*`, `playwright/*`
+   (aliases in `githubMCPServerAliases`/`playwrightMCPServerAliases`). Do NOT
+   enumerate individual `mcp_github_*` tools — the wildcard covers them.
+3. **Extension-registered tools** — bare keys as they appear in the
+   copilot-chat registry
+   (`%APPDATA%/Code/User/globalStorage/github.copilot-chat/toolEmbeddings.json`),
+   e.g. `configure_python_environment`, `install_python_packages`,
+   `notebook_install_packages`, `manage_todo_list`.
+
+Invalid on this host: telemetry tool ids (`copilot_readFile` in session logs
+is an id, not a selector), `copilot_*` package.json `name` fields (selector
+is the sibling `toolReferenceName`, and even those short names like
+`readFile` are deprecated in favor of the namespaced core set above), bare
+codex names (`read_file`, `run_in_terminal`, `apply_patch`), and stale host
+variants (`navigate_page`, `click_element`).
+
+Resolution order: validator rename diagnostics (ground truth, apply
+directly) → namespaced core set in workbench bundle → `github/*`/`playwright/*`
+wildcards → `toolEmbeddings.json` keys for extension tools. When the editor
+shows live squiggles the agent cannot see, ask the user for the exact
+offending name and its suggested replacement — each one maps a family.
 
 ## Decision rule
 

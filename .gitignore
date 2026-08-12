@@ -1,3 +1,8 @@
 .vscode/settings.json
+.vscode/prompt-diagnostics.json
 graphify-out/
 tmp/
+tmp_*
+agent_tool_analysis/
+.agents
+.github/agents/*.agent.md
