@@ -232,24 +232,33 @@ later asks for validation, use the replay workflow in `REPLAY.md`.
 For every generated Copilot `.agent.md` file, run the Chat Customizations
 Evaluations analyzer and iterate until clean:
 
-For programmatic consumption, an optional companion VS Code extension can
-export the live diagnostic snapshot through `vscode.languages.getDiagnostics`
-as the versioned JSON contract in
+For programmatic consumption, the companion extension in
+`vscode-prompt-validator/` exports the current diagnostic snapshot through
+`vscode.languages.getDiagnostics` as the versioned JSON contract in
 [`docs/prompt-validator-diagnostics.schema.json`](docs/prompt-validator-diagnostics.schema.json).
 See [`docs/prompt-validator-protocol.md`](docs/prompt-validator-protocol.md)
 for the producer workflow and freshness rules. The JSON bridge is a transport
 for editor diagnostics; it does not make the internal `promptValidator`
 service public and it must not treat a stale snapshot as a clean validation.
 
-1. Run the VS Code command `chatCustomizationsEvaluations.analyzePrompt` with
+1. Build and enable the companion extension before expecting a structured
+  export. From `vscode-prompt-validator/`, run `npm install` and `npm test`,
+  then press `F5` in that folder to launch an Extension Development Host, or
+  run `npm run package` and install the resulting VSIX in the target VS Code
+  profile.
+2. In the target workspace, save or otherwise revalidate the generated files,
+  then run **Prompt Validator: Export Diagnostics as JSON**. This creates
+  `.vscode/prompt-diagnostics.json`. The command exports a snapshot; its
+  timestamp does not prove that validation just ran.
+3. Run the VS Code command `chatCustomizationsEvaluations.analyzePrompt` with
    the file's absolute path as its argument. Repeat for each generated file.
-2. Read the file's diagnostics from the Problems panel (via the error-reading
+4. Read the file's diagnostics from the Problems panel (via the error-reading
   tool), or consume a bridge export with
   `unknown_extension_references_from_json()` when structured output is
   available. Do not rely on a single read immediately after analysis; if a
   finding looks stale after an edit, verify with a file search before
   re-acting on it. The text path remains the portable fallback.
-3. Fix actionable findings with focused edits. Common validator findings seen
+5. Fix actionable findings with focused edits. Common validator findings seen
    in practice, and how to resolve them:
    - **Ambiguous delegation boundary** — when the prompt lists shared core
      tools (file/terminal/errors) but says "delegate anything outside X," the

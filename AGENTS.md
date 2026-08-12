@@ -16,11 +16,12 @@ Use the default five canonical triage labels. See `docs/agents/triage-labels.md`
 
 This is a single-context repo. See `docs/agents/domain.md`.
 
-### Optional VS Code companion
+### VS Code companion
 
 This repository owns the prompt-validator diagnostics schema, protocol, and
-Python consumer. An optional companion VS Code extension owns live diagnostic
-collection through `vscode.languages.getDiagnostics()` and may export the
-versioned JSON payload described in `docs/prompt-validator-protocol.md`.
-Keep the extension's TypeScript project and VS Code release lifecycle outside
-this Python repository. The existing text diagnostic path remains supported.
+Python consumer. The companion TypeScript extension lives in
+`vscode-prompt-validator/` and owns live diagnostic collection through
+`vscode.languages.getDiagnostics()`, exporting the versioned JSON payload
+described in `docs/prompt-validator-protocol.md`. Keep its generated build
+output and VSIX lifecycle inside that directory. The existing text diagnostic
+path remains supported.
