@@ -15,15 +15,10 @@ if __package__ in {None, ""}:
 from optimize_agent_tools.analysis_pipeline import (
     DEFAULT_GITHUB_EXPOSURE_RATES,
     analyze,
-    apply_offline_replay_result,
     load_explicit_tool_costs,
 )
 from optimize_agent_tools.freshness import FreshnessConfig
-from optimize_agent_tools.offline_replay import (
-    assess_recorded_replay,
-    run_recorded_replay,
-)
-from optimize_agent_tools.reporting import print_summary, render_markdown
+from optimize_agent_tools.reporting import print_summary
 from optimize_agent_tools.telemetry_ingestion import (
     get_codex_sessions,
     get_vscode_sessions,
@@ -220,61 +215,32 @@ def main() -> int:
         nucleus_threshold=args.nucleus_threshold,
         freshness_config=_freshness_config(args),
     )
+    replay_bundle = None
     if args.offline_replay_input:
         replay_input_path = Path(args.offline_replay_input)
         if not replay_input_path.is_file():
             raise SystemExit(
                 f"Recorded replay bundle was not found: {replay_input_path}"
             )
-        if args.offline_replay_candidate:
-            report["specialist_recommendation"][
-                "best_guess_candidate_id"
-            ] = args.offline_replay_candidate
         replay_bundle = json.loads(replay_input_path.read_text(encoding="utf-8"))
-        replay_readiness = assess_recorded_replay(report, replay_bundle)
-        if replay_readiness.ready:
-            try:
-                replay_report = run_recorded_replay(report, replay_bundle)
-                candidate_id = replay_readiness.candidate_id
-                comparison = replay_report["comparisons"][candidate_id]
-            except (KeyError, TypeError, ValueError) as error:
-                report["offline_replay"] = {
-                    "status": "not_run",
-                    "reasons": [f"recorded replay validation failed: {error}"],
-                }
-            else:
-                report["specialist_recommendation"] = apply_offline_replay_result(
-                    report["specialist_recommendation"], candidate_id, comparison
-                )
-                report["offline_replay"] = {
-                    "status": "completed",
-                    "candidate_id": candidate_id,
-                    "comparison": comparison,
-                }
-        else:
-            report["offline_replay"] = {
-                "status": "not_run",
-                "reasons": list(replay_readiness.reasons),
-            }
-    else:
-        report["offline_replay"] = {
-            "status": "not_requested",
-            "reasons": [
-                "offline replay is optional advanced validation; no bundle was supplied"
-            ],
-        }
-    report["config"]["explicit_cost_entries"] = len(explicit_costs)
+    report = report.finalize(
+        explicit_cost_entries=len(explicit_costs),
+        replay_bundle=replay_bundle,
+        replay_candidate=args.offline_replay_candidate,
+    )
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     json_path = output_dir / "agent_tool_analysis.json"
     markdown_path = output_dir / "agent_tool_analysis.md"
     manifest_path = output_dir / "architecture_manifest.json"
     json_path.write_text(
-        json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
+        report.to_json(), encoding="utf-8"
     )
-    markdown_path.write_text(render_markdown(report), encoding="utf-8")
+    markdown_path.write_text(report.to_markdown(), encoding="utf-8")
     manifest_path.write_text(
-        json.dumps(report["architecture_manifest"], indent=2, ensure_ascii=False),
+        json.dumps(
+            report.serialize()["architecture_manifest"], indent=2, ensure_ascii=False
+        ),
         encoding="utf-8",
     )
     print_summary(report, json_path, markdown_path, manifest_path)

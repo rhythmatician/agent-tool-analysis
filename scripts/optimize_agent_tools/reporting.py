@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from .cost_evaluation import COST_SCENARIOS
 from .exposure_models import EXPOSURE_MODEL_DESCRIPTIONS, EXPOSURE_MODELS
@@ -24,7 +24,7 @@ def _append_table(
     lines.extend([headers, separator, *rows, ""])
 
 
-def render_markdown(report: dict[str, Any]) -> str:
+def render_markdown(report: Mapping[str, Any]) -> str:
     pruned = report["pruned_flat_baseline"]
     specialist = report.get("specialist_recommendation")
     lines = [

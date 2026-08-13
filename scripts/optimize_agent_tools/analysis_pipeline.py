@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import itertools
+import json
 import math
 import statistics
+from collections.abc import Iterator, Mapping as MappingABC, Sequence
 from collections import Counter, defaultdict
-from copy import deepcopy
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Callable, Iterable, Mapping, TypeVar
 
 from .clustering import (
@@ -92,16 +94,170 @@ class AnalysisStageError(RuntimeError):
         super().__init__(f"{stage} stage failed: {cause}")
 
 
-@dataclass(frozen=True)
-class AnalysisWorkflowResult:
-    """Typed boundary between workflow execution and report serialization."""
+class _FrozenSequence(Sequence[Any]):
+    """Immutable sequence with value equality against report lists."""
 
-    report: dict[str, Any]
+    def __init__(self, values: Iterable[Any]) -> None:
+        self._values = tuple(values)
+
+    def __getitem__(self, index: int | slice) -> Any:
+        return self._values[index]
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, Sequence) and list(self) == list(other)
+
+
+def _freeze(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return _FrozenSequence(_freeze(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_freeze(item) for item in value)
+    if isinstance(value, set):
+        return frozenset(_freeze(item) for item in value)
+    return value
+
+
+def _thaw(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _thaw(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return [_thaw(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        return sorted(_thaw(item) for item in value)
+    return value
+
+
+def _validate_artifact(report: Mapping[str, Any]) -> None:
+    """Protect invariants shared by search, recommendation, and presenters."""
+
+    required = {
+        "config",
+        "architecture_manifest",
+        "architecture_options",
+        "partition_search",
+        "specialist_recommendation",
+    }
+    missing = sorted(required - report.keys())
+    if missing:
+        raise ValueError(f"analysis artifact is missing sections: {', '.join(missing)}")
+
+    option_ids = [option["architecture_id"] for option in report["architecture_options"]]
+    recommendation = report["specialist_recommendation"]
+    if option_ids != recommendation["architecture_option_ids"]:
+        raise ValueError("architecture option ids disagree with the recommendation")
+
+    manifest_ids = {
+        architecture["architecture_id"]
+        for architecture in report["architecture_manifest"]["architectures"]
+    }
+    if not set(option_ids) <= manifest_ids:
+        raise ValueError("architecture options must reference manifest architectures")
+
+    search = report["partition_search"]["search_provenance"]
+    for field in ("search_complete", "search_strategy", "pareto_scope"):
+        if search[field] != recommendation[field]:
+            raise ValueError(f"partition search {field} disagrees with the recommendation")
+
+
+@dataclass(frozen=True, init=False)
+class AnalysisWorkflowResult(MappingABC[str, Any]):
+    """Canonical, immutable analysis artifact and its materializers."""
+
+    report: Mapping[str, Any]
+
+    @classmethod
+    def materialize(cls, report: Mapping[str, Any]) -> AnalysisWorkflowResult:
+        """Validate a completed workflow transition and seal its artifact."""
+
+        _validate_artifact(report)
+        result = object.__new__(cls)
+        object.__setattr__(result, "report", _freeze(report))
+        return result
 
     def serialize(self) -> dict[str, Any]:
         """Return an isolated report for JSON and Markdown consumers."""
 
-        return deepcopy(self.report)
+        return _thaw(self.report)
+
+    def __getitem__(self, key: str) -> Any:
+        return self.report[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.report)
+
+    def __len__(self) -> int:
+        return len(self.report)
+
+    def finalize(
+        self,
+        *,
+        explicit_cost_entries: int,
+        replay_bundle: Mapping[str, Any] | None = None,
+        replay_candidate: str | None = None,
+    ) -> AnalysisWorkflowResult:
+        """Complete optional replay and configuration transitions before output."""
+
+        from .offline_replay import assess_recorded_replay, run_recorded_replay
+
+        report = self.serialize()
+        report["config"]["explicit_cost_entries"] = explicit_cost_entries
+        if replay_candidate is not None:
+            report["specialist_recommendation"]["best_guess_candidate_id"] = (
+                replay_candidate
+            )
+        if replay_bundle is None:
+            report["offline_replay"] = {
+                "status": "not_requested",
+                "reasons": [
+                    "offline replay is optional advanced validation; no bundle was supplied"
+                ],
+            }
+            return self.materialize(report)
+
+        replay_readiness = assess_recorded_replay(report, replay_bundle)
+        if not replay_readiness.ready:
+            report["offline_replay"] = {
+                "status": "not_run",
+                "reasons": list(replay_readiness.reasons),
+            }
+            return self.materialize(report)
+
+        try:
+            replay_report = run_recorded_replay(report, replay_bundle)
+            candidate_id = replay_readiness.candidate_id
+            comparison = replay_report["comparisons"][candidate_id]
+        except (KeyError, TypeError, ValueError) as error:
+            report["offline_replay"] = {
+                "status": "not_run",
+                "reasons": [f"recorded replay validation failed: {error}"],
+            }
+        else:
+            report["specialist_recommendation"] = apply_offline_replay_result(
+                report["specialist_recommendation"], candidate_id, comparison
+            )
+            report["offline_replay"] = {
+                "status": "completed",
+                "candidate_id": candidate_id,
+                "comparison": comparison,
+            }
+        return self.materialize(report)
+
+    def to_json(self) -> str:
+        """Materialize the canonical artifact as stable JSON."""
+
+        return json.dumps(self.serialize(), indent=2, ensure_ascii=False)
+
+    def to_markdown(self) -> str:
+        """Materialize the canonical artifact through its report presenter."""
+
+        from .reporting import render_markdown
+
+        return render_markdown(self)
 
 
 def _run_stage(stage: str, operation: Callable[[], _StageValue]) -> _StageValue:
@@ -2049,21 +2205,26 @@ def _run_analysis(
     pareto_candidate_ids = [
         candidate.architecture_id for candidate in partition_result.pareto_candidates
     ]
-    specialist_classification = classify_specialist_recommendation(
-        pareto_candidates=(
-            {
-                "architecture_id": candidate.architecture_id,
-                "agent_count": candidate.agent_count,
-                "expected_context_cost_after_communication": candidate.expected_context_cost_after_communication,
-                "is_cost_complete": candidate.is_cost_complete,
-            }
-            for candidate in partition_result.pareto_candidates
+    specialist_classification = _run_stage(
+        "recommendation",
+        lambda: classify_specialist_recommendation(
+            pareto_candidates=(
+                {
+                    "architecture_id": candidate.architecture_id,
+                    "agent_count": candidate.agent_count,
+                    "expected_context_cost_after_communication": candidate.expected_context_cost_after_communication,
+                    "is_cost_complete": candidate.is_cost_complete,
+                }
+                for candidate in partition_result.pareto_candidates
+            ),
+            candidate_agents=candidates,
+            directional_variants=variants,
+            exposure_evidence_sufficient=measurement[
+                "exposure_evidence_sufficient"
+            ],
+            cost_complete=measurement["cost_completeness"]["exact_complete"],
+            search_complete=partition_result.search_complete,
         ),
-        candidate_agents=candidates,
-        directional_variants=variants,
-        exposure_evidence_sufficient=measurement["exposure_evidence_sufficient"],
-        cost_complete=measurement["cost_completeness"]["exact_complete"],
-        search_complete=partition_result.search_complete,
     )
     search_candidates = partition_result.report.get("candidates", [])
     manifest_model = materialize_architecture_manifest(
@@ -2168,8 +2329,10 @@ def _run_analysis(
             "No cost-complete empirical Pareto candidates or directional "
             "specialist recommendation is supported by the available evidence."
         )
-    return AnalysisWorkflowResult(
-        {
+    return _run_stage(
+        "artifact materialization",
+        lambda: AnalysisWorkflowResult.materialize(
+            {
             "config": {
                 "min_tool_sessions": min_tool_sessions,
                 "similarity_threshold": similarity_threshold,
@@ -2283,7 +2446,8 @@ def _run_analysis(
                 "active_tools_for_clustering": len(active_tools),
                 "sources": source_summary(sessions),
             },
-        }
+            }
+        ),
     )
 
 
@@ -2313,8 +2477,8 @@ def analyze(
     nucleus_threshold: float | None = DEFAULT_NUCLEUS_THRESHOLD,
     runtime_metrics_by_alternative: Mapping[str, RuntimeMetrics] | None = None,
     runtime_recommendation_thresholds: RecommendationThresholds | None = None,
-) -> dict[str, Any]:
-    """Run the analysis workflow and return its stable serialized report."""
+) -> AnalysisWorkflowResult:
+    """Run the analysis workflow and return its canonical artifact."""
 
     result = _run_analysis(
         sessions,
@@ -2342,4 +2506,4 @@ def analyze(
         runtime_metrics_by_alternative=runtime_metrics_by_alternative,
         runtime_recommendation_thresholds=runtime_recommendation_thresholds,
     )
-    return result.serialize()
+    return result
