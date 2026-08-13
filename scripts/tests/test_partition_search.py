@@ -72,6 +72,7 @@ def test_normal_analysis_workflow_includes_generic_specialist_recommendation() -
         min_cluster_sessions=1,
         delegation_overhead_tokens=0,
         max_agents=2,
+        nucleus_threshold=None,
     )
 
     recommendation = report["specialist_recommendation"]

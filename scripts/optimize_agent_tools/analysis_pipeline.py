@@ -44,6 +44,7 @@ from .freshness import (
     trial_workload_opportunities,
 )
 from .nmf_screening import NMFConfig, run_nmf_screening
+from .nucleus import DEFAULT_NUCLEUS_THRESHOLD, detect_nucleus
 from .replay_harness import (
     BASELINE_ARCHITECTURE_ID,
     materialize_architecture_manifest,
@@ -250,9 +251,11 @@ def build_stats(
             sessions_exposed=exposure_counts[name],
             sessions_called=session_counts[name],
             usage_rate=session_counts[name] / total_calls if total_calls else 0.0,
-            call_given_exposed=called_in_exposed[name] / exposure_counts[name]
-            if exposure_counts[name]
-            else None,
+            call_given_exposed=(
+                called_in_exposed[name] / exposure_counts[name]
+                if exposure_counts[name]
+                else None
+            ),
             definition_tokens=definition_tokens,
             definition_cost_source=cost_source,
         )
@@ -659,9 +662,11 @@ def _criterion_winner(
             eligible,
             key=lambda row: (
                 (-row[key] if maximize else row[key]),
-                row["definition_tokens_mid"]
-                if row["definition_tokens_mid"] is not None
-                else float("inf"),
+                (
+                    row["definition_tokens_mid"]
+                    if row["definition_tokens_mid"] is not None
+                    else float("inf")
+                ),
                 row["activation_rate"],
                 row["tools"],
             ),
@@ -741,9 +746,9 @@ def evaluate_cluster_one_subsets(
                         for point in sensitivity["grid"]
                         if point["assumed_exposure_rate"] in requested
                     ],
-                    "dependency_warnings": warnings[0]["missing_dependencies"]
-                    if warnings
-                    else {},
+                    "dependency_warnings": (
+                        warnings[0]["missing_dependencies"] if warnings else {}
+                    ),
                 }
             )
     frontier = _pareto_frontier(rows)
@@ -826,12 +831,16 @@ def build_candidate_decision_table(
                         "specialist_definition_tokens": definition_tokens,
                         "expected_tokens_per_session": expected,
                         "absolute_reduction_per_session": reduction,
-                        "relative_reduction": reduction / baseline
-                        if reduction is not None and baseline
-                        else None,
-                        "break_even_github_exposure_rate": expected / definition_tokens
-                        if expected is not None and definition_tokens
-                        else None,
+                        "relative_reduction": (
+                            reduction / baseline
+                            if reduction is not None and baseline
+                            else None
+                        ),
+                        "break_even_github_exposure_rate": (
+                            expected / definition_tokens
+                            if expected is not None and definition_tokens
+                            else None
+                        ),
                         "internal_affinity": row["internal_affinity"],
                         "minimum_boundary_margin": row["min_boundary_margin"],
                     }
@@ -843,9 +852,11 @@ def build_candidate_decision_table(
         ]
         candidates.append(
             {
-                "candidate_id": "cluster_01_reference"
-                if candidate_type == "reference"
-                else f"pareto_{index:02d}",
+                "candidate_id": (
+                    "cluster_01_reference"
+                    if candidate_type == "reference"
+                    else f"pareto_{index:02d}"
+                ),
                 "candidate_type": candidate_type,
                 "tools": row["tools"],
                 "tool_count": row["tool_count"],
@@ -853,13 +864,14 @@ def build_candidate_decision_table(
                 "specialist_definition_tokens": definition_tokens,
                 "internal_affinity": row["internal_affinity"],
                 "minimum_boundary_margin": row["min_boundary_margin"],
-                "worst_case_positive_reduction": min(known_reductions)
-                if known_reductions
-                else None,
-                "viable_cells": sum(reduction > 0 for reduction in known_reductions)
-                / len(cells)
-                if len(known_reductions) == len(cells) and cells
-                else None,
+                "worst_case_positive_reduction": (
+                    min(known_reductions) if known_reductions else None
+                ),
+                "viable_cells": (
+                    sum(reduction > 0 for reduction in known_reductions) / len(cells)
+                    if len(known_reductions) == len(cells) and cells
+                    else None
+                ),
                 "cells": cells,
             }
         )
@@ -960,52 +972,55 @@ def expected_known_token_cost(
                 1 for name in known if stats[name].calls > 0
             ),
             "observed_tools_total": sum(1 for stat in stats.values() if stat.calls > 0),
-            "observed_tool_coverage_rate": sum(
-                1 for name in known if stats[name].calls > 0
-            )
-            / sum(1 for stat in stats.values() if stat.calls > 0)
-            if any(stat.calls > 0 for stat in stats.values())
-            else 0.0,
+            "observed_tool_coverage_rate": (
+                sum(1 for name in known if stats[name].calls > 0)
+                / sum(1 for stat in stats.values() if stat.calls > 0)
+                if any(stat.calls > 0 for stat in stats.values())
+                else 0.0
+            ),
             "calls_with_known_cost": known_calls,
             "total_calls": total_calls,
-            "usage_weighted_coverage_rate": known_calls / total_calls
-            if total_calls
-            else 0.0,
-            "exposure_weighted_coverage_rate": sum(
-                stats[name].definition_tokens is not None
-                for session in exposure_sessions
-                for name in session.exposed_tools
-            )
-            / exposure_rows
-            if exposure_rows
-            else 0.0,
+            "usage_weighted_coverage_rate": (
+                known_calls / total_calls if total_calls else 0.0
+            ),
+            "exposure_weighted_coverage_rate": (
+                sum(
+                    stats[name].definition_tokens is not None
+                    for session in exposure_sessions
+                    for name in session.exposed_tools
+                )
+                / exposure_rows
+                if exposure_rows
+                else 0.0
+            ),
         },
         "flat_baseline_known_tokens": baseline,
-        "unassigned_known_tokens_after_partition": statistics.fmean(
-            sum(
-                stats[name].definition_tokens or 0
-                for name in session.exposed_tools
-                if name in parent_tools
+        "unassigned_known_tokens_after_partition": (
+            statistics.fmean(
+                sum(
+                    stats[name].definition_tokens or 0
+                    for name in session.exposed_tools
+                    if name in parent_tools
+                )
+                for session in exposure_sessions
             )
-            for session in exposure_sessions
-        )
-        if exposure_sessions
-        else 0.0,
+            if exposure_sessions
+            else 0.0
+        ),
         "expected_known_tokens_per_session_after_partition": expected,
         "expected_known_tokens_saved_per_session": baseline - expected,
-        "expected_known_token_savings_rate": (baseline - expected) / baseline
-        if baseline
-        else None,
+        "expected_known_token_savings_rate": (
+            (baseline - expected) / baseline if baseline else None
+        ),
         "delegation_overhead_tokens_per_activated_specialist": delegation_overhead_tokens,
-        "median_specialists_activated_per_session": statistics.median(specialist_counts)
-        if specialist_counts
-        else 0,
-        "sessions_requiring_multiple_specialists_rate": sum(
-            count > 1 for count in specialist_counts
-        )
-        / len(specialist_counts)
-        if specialist_counts
-        else 0.0,
+        "median_specialists_activated_per_session": (
+            statistics.median(specialist_counts) if specialist_counts else 0
+        ),
+        "sessions_requiring_multiple_specialists_rate": (
+            sum(count > 1 for count in specialist_counts) / len(specialist_counts)
+            if specialist_counts
+            else 0.0
+        ),
         "cost_scenarios": expected_token_cost_scenarios(
             sessions,
             stats,
@@ -1043,18 +1058,22 @@ def sensitivity_summary(
     return {
         "min_mid_reduction": minimum,
         "max_mid_reduction": maximum,
-        "exposure_model_at_min": min(
-            (model for model, value in available.items() if value == minimum),
-            key=EXPOSURE_MODELS.index,
-        )
-        if available
-        else None,
-        "exposure_model_at_max": max(
-            (model for model, value in available.items() if value == maximum),
-            key=EXPOSURE_MODELS.index,
-        )
-        if available
-        else None,
+        "exposure_model_at_min": (
+            min(
+                (model for model, value in available.items() if value == minimum),
+                key=EXPOSURE_MODELS.index,
+            )
+            if available
+            else None
+        ),
+        "exposure_model_at_max": (
+            max(
+                (model for model, value in available.items() if value == maximum),
+                key=EXPOSURE_MODELS.index,
+            )
+            if available
+            else None
+        ),
         "sign_stable": stable,
     }
 
@@ -1067,9 +1086,11 @@ def reduction_metrics(
         "baseline_tokens_per_session": baseline_tokens_per_session,
         "proposed_tokens_per_session": proposed_tokens_per_session,
         "absolute_token_reduction_per_session": reduction,
-        "relative_token_reduction": reduction / baseline_tokens_per_session
-        if baseline_tokens_per_session
-        else 0.0,
+        "relative_token_reduction": (
+            reduction / baseline_tokens_per_session
+            if baseline_tokens_per_session
+            else 0.0
+        ),
     }
 
 
@@ -1268,11 +1289,13 @@ def evaluate_architecture_variants(
                 "historical_called_tool_coverage_rate": coverage,
                 "scenarios": scenarios,
                 "sensitivity": sensitivity_summary(model_scenarios),
-                "exposure_economics": cluster_exposure_economics(
-                    scenario_sessions, stats, specialist, delegation_overhead_tokens
-                )
-                if specialist
-                else None,
+                "exposure_economics": (
+                    cluster_exposure_economics(
+                        scenario_sessions, stats, specialist, delegation_overhead_tokens
+                    )
+                    if specialist
+                    else None
+                ),
                 "scenarios_by_exposure_model": {
                     model: {
                         scenario: {
@@ -1331,9 +1354,7 @@ def definition_cost_completeness(
         "status": (
             "exact"
             if len(exact) == len(names)
-            else "estimated"
-            if not unknown
-            else "incomplete"
+            else "estimated" if not unknown else "incomplete"
         ),
         "exact_complete": len(exact) == len(names),
         "tools_total": len(names),
@@ -1429,9 +1450,11 @@ def classify_specialist_recommendation(
             "why": [
                 "cost-complete candidate retained on the empirical Pareto frontier",
                 "lowest modeled context cost among retained complete candidates",
-                "quality gate passed"
-                if quality_gate_passed
-                else "quality preservation remains unvalidated",
+                (
+                    "quality gate passed"
+                    if quality_gate_passed
+                    else "quality preservation remains unvalidated"
+                ),
             ],
             "required_validation": (
                 "none beyond ongoing monitoring"
@@ -1642,9 +1665,11 @@ def build_architecture_options(
                     if is_provisional
                     else "empirical cost frontier; quality unvalidated"
                 ),
-                "provenance": architecture.get("provenance", {})
-                if is_provisional
-                else {"source": "empirical_partition_search"},
+                "provenance": (
+                    architecture.get("provenance", {})
+                    if is_provisional
+                    else {"source": "empirical_partition_search"}
+                ),
             }
         )
     return options
@@ -1751,6 +1776,7 @@ def _run_analysis(
     nmf_iterations: int = 160,
     freshness_config: FreshnessConfig | None = None,
     exposure_model: str = "observed_only",
+    nucleus_threshold: float | None = DEFAULT_NUCLEUS_THRESHOLD,
     runtime_metrics_by_alternative: Mapping[str, RuntimeMetrics] | None = None,
     runtime_recommendation_thresholds: RecommendationThresholds | None = None,
 ) -> AnalysisWorkflowResult:
@@ -1797,6 +1823,17 @@ def _run_analysis(
     role_records = classify_tool_roles(stats)
     classifications = classify_tools(stats, global_usage_threshold)
     global_tools = choose_global_tools(stats, global_usage_threshold)
+    if nucleus_threshold is None:
+        nucleus = None
+        nucleus_ids: set[str] = set()
+    else:
+        nucleus = _run_stage(
+            "nucleus detection",
+            lambda: detect_nucleus(call_sessions, threshold=nucleus_threshold),
+        )
+        nucleus_ids = set(nucleus.raw_tool_ids)
+    # Shared surface for partition search = canonical nucleus + legacy global.
+    shared_seed_tools = sorted(global_tools | nucleus_ids)
     session_index = build_session_index(call_sessions)
     pairs = all_pair_metrics(
         sorted(
@@ -1805,11 +1842,14 @@ def _run_analysis(
         session_index,
         build_adjacency_counts(call_sessions),
     )
+    # Nucleus members are shared on every peer; excluding them from clustering
+    # prevents leaky core families (ext>int) from absorbing real specialists.
     active_tools = sorted(
         name
         for name, stat in stats.items()
         if stat.sessions >= min_tool_sessions
         and role_records[name].role not in {"delegation", "coordination"}
+        and name not in nucleus_ids
     )
     nmf_screening = run_nmf_screening(
         call_sessions,
@@ -1818,7 +1858,7 @@ def _run_analysis(
             for tool, stat in stats.items()
             if stat.sessions >= min_tool_sessions
             and role_records[tool].role == "domain"
-            and tool not in global_tools
+            and tool not in shared_seed_tools
         ],
         role_records,
         config=NMFConfig(
@@ -1911,7 +1951,7 @@ def _run_analysis(
             sessions=call_sessions,
             stats=stats,
             required_tools=retained_tools,
-            global_tools=global_tools,
+            global_tools=shared_seed_tools,
             dependencies=KNOWN_DEPENDENCIES,
             max_agents=max_agents,
             communication_tokens_per_handoff=communication_tokens_per_handoff,
@@ -1982,12 +2022,12 @@ def _run_analysis(
                 "definition_provider": definition.provider if definition else None,
                 "definition_runtime": definition.runtime if definition else None,
                 "definition_raw_name": definition.raw_name if definition else None,
-                "definition_confidence": definition.confidence
-                if definition
-                else "unresolved",
-                "definition_evidence_type": definition.evidence_type
-                if definition
-                else "unresolved",
+                "definition_confidence": (
+                    definition.confidence if definition else "unresolved"
+                ),
+                "definition_evidence_type": (
+                    definition.evidence_type if definition else "unresolved"
+                ),
                 "sessions_exposed": stat.sessions_exposed,
                 "sessions_directly_observed_exposure": stat.sessions_exposed,
                 "sessions_called": stat.sessions_called,
@@ -2174,18 +2214,20 @@ def _run_analysis(
             "partition_search": partition_result.report,
             "topology_discovery": topology_discovery,
             "specialist_recommendation": {
-                "action": "choose_architecture_option"
-                if multiple_options
-                else "recommend_architecture",
+                "action": (
+                    "choose_architecture_option"
+                    if multiple_options
+                    else "recommend_architecture"
+                ),
                 "headline": specialist_headline,
                 **specialist_classification,
                 "baseline_architecture_id": BASELINE_ARCHITECTURE_ID,
                 "pareto_candidate_ids": pareto_candidate_ids,
                 "provisional_architecture_ids": provisional_architecture_ids,
                 "architecture_option_ids": option_ids,
-                "decision_mode": "user_choice"
-                if multiple_options
-                else "single_recommendation",
+                "decision_mode": (
+                    "user_choice" if multiple_options else "single_recommendation"
+                ),
                 "search_complete": partition_result.search_complete,
                 "search_strategy": partition_result.search_strategy,
                 "pareto_scope": partition_result.pareto_scope,
@@ -2209,6 +2251,7 @@ def _run_analysis(
             "definition_resolution": definition_resolution_report(stats, registry),
             "definition_discovery": discovery,
             "clusters": cluster_reports,
+            "nucleus": nucleus.to_report() if nucleus is not None else None,
             "global_candidates": sorted(global_tools),
             "candidate_agents": candidates,
             "architecture_variants": variants,
@@ -2267,6 +2310,7 @@ def analyze(
     nmf_iterations: int = 160,
     freshness_config: FreshnessConfig | None = None,
     exposure_model: str = "observed_only",
+    nucleus_threshold: float | None = DEFAULT_NUCLEUS_THRESHOLD,
     runtime_metrics_by_alternative: Mapping[str, RuntimeMetrics] | None = None,
     runtime_recommendation_thresholds: RecommendationThresholds | None = None,
 ) -> dict[str, Any]:
@@ -2294,6 +2338,7 @@ def analyze(
         nmf_iterations=nmf_iterations,
         freshness_config=freshness_config,
         exposure_model=exposure_model,
+        nucleus_threshold=nucleus_threshold,
         runtime_metrics_by_alternative=runtime_metrics_by_alternative,
         runtime_recommendation_thresholds=runtime_recommendation_thresholds,
     )
