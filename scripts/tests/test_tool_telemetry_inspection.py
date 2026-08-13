@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,8 @@ from optimize_agent_tools.telemetry_ingestion import (
     extract_codex_exposures,
     extract_codex_provider_metadata,
     find_raw_tool_call,
+    get_codex_sessions,
+    get_vscode_sessions,
     normalize_tool_name,
 )
 
@@ -88,6 +91,74 @@ def test_codex_adapter_normalizes_calls_and_dynamic_provider_evidence() -> None:
     assert [record.normalized_name for record in facts.definitions] == [
         "github.fetch_issue"
     ]
+
+
+def test_vscode_jsonl_fixture_is_assembled_as_canonical_evidence(
+    tmp_path: Path,
+) -> None:
+    fixture = (
+        tmp_path
+        / "workspace"
+        / "chatSessions"
+        / "session.jsonl"
+    )
+    fixture.parent.mkdir(parents=True)
+    fixture.write_text(
+        json.dumps(
+            {
+                "tool_name": "runSubagent-worker",
+                "timestamp": "2026-08-01T12:00:00Z",
+                "tools": [{"name": "search", "description": "Search files"}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    sessions, definitions = get_vscode_sessions(str(tmp_path))
+
+    assert len(sessions) == 1
+    assert isinstance(sessions[0], EvidenceSession)
+    assert sessions[0].actual_calls == ["agent"]
+    assert sessions[0].observed_at.isoformat() == "2026-08-01T12:00:00+00:00"
+    assert set(definitions) == {"search"}
+
+
+def test_codex_jsonl_fixture_is_assembled_as_canonical_evidence(
+    tmp_path: Path,
+) -> None:
+    fixture = tmp_path / "2026" / "08" / "session.jsonl"
+    fixture.parent.mkdir(parents=True)
+    fixture.write_text(
+        json.dumps(
+            {
+                "timestamp": "2026-08-01T12:00:00Z",
+                "payload": {
+                    "type": "function_call",
+                    "name": "exec",
+                    "dynamic_tools": [
+                        {
+                            "name": "github",
+                            "tools": [
+                                {"name": "github.fetch_issue", "inputSchema": {}}
+                            ],
+                        }
+                    ],
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    sessions, definitions = get_codex_sessions(str(tmp_path))
+
+    assert len(sessions) == 1
+    assert isinstance(sessions[0], EvidenceSession)
+    assert sessions[0].actual_calls == ["exec"]
+    assert sessions[0].direct_exposure == frozenset({"github.fetch_issue"})
+    assert sessions[0].available_providers == frozenset({"github"})
+    assert set(definitions) == {"github.fetch_issue"}
 from optimize_agent_tools.tool_definition_registry import DefinitionRecord
 
 

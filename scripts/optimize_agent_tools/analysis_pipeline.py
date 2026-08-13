@@ -151,6 +151,12 @@ def _validate_artifact(report: Mapping[str, Any]) -> None:
     if option_ids != recommendation["architecture_option_ids"]:
         raise ValueError("architecture option ids disagree with the recommendation")
 
+    replay_candidate_id = recommendation.get("best_guess_candidate_id")
+    if replay_candidate_id is not None and replay_candidate_id not in option_ids:
+        raise ValueError(
+            "replay candidate must reference a recommended architecture option"
+        )
+
     manifest_ids = {
         architecture["architecture_id"]
         for architecture in report["architecture_manifest"]["architectures"]
