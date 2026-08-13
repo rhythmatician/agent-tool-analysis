@@ -45,7 +45,11 @@ from .freshness import (
 )
 from .nmf_screening import NMFConfig, run_nmf_screening
 from .nucleus import DEFAULT_NUCLEUS_THRESHOLD, detect_nucleus
-from .replay_harness import BASELINE_ARCHITECTURE_ID
+from .replay_harness import (
+    BASELINE_ARCHITECTURE_ID,
+    materialize_architecture_manifest,
+    serialize_architecture_manifest,
+)
 from .runtime_alternatives import build_runtime_alternatives_report
 from .runtime_metrics import RuntimeMetrics
 from .runtime_recommendation import (
@@ -76,8 +80,6 @@ KNOWN_DEPENDENCIES = {
 ESTIMATION_BASIS = "global distribution of resolved definition tokens (25th percentile / median / 75th percentile)"
 DECISION_GITHUB_EXPOSURE_RATES = (0.25, 0.50, 0.75, 1.0)
 DECISION_DELEGATION_OVERHEADS = (0, 100, 250, 500)
-MIN_PROVISIONAL_AGENT_TOOLS = 2
-MIN_PROVISIONAL_AGENT_SHARE = 0.25
 _StageValue = TypeVar("_StageValue")
 
 
@@ -1521,143 +1523,6 @@ def classify_specialist_recommendation(
     }
 
 
-def materialize_provisional_architecture(
-    *,
-    recommendation: Mapping[str, Any],
-    candidate_agents: Iterable[Mapping[str, Any]],
-    directional_variants: Iterable[Mapping[str, Any]],
-    retained_tools: Iterable[str],
-    global_tools: Iterable[str],
-    search_provenance: Mapping[str, Any],
-    dependencies: Mapping[str, Iterable[str]] | None = None,
-    search_candidates: Iterable[Mapping[str, Any]] | None = None,
-) -> dict[str, Any] | None:
-    """Materialize a provisional split only from concrete partition evidence."""
-
-    if recommendation.get("status") != "provisional":
-        return None
-    if recommendation.get("direction") != "2-agent architecture":
-        return None
-
-    searched = [
-        candidate
-        for candidate in (search_candidates or ())
-        if int(candidate.get("agent_count", 0)) == 2
-    ]
-    if searched:
-        selected_candidate = min(
-            searched,
-            key=lambda candidate: (
-                candidate.get("expected_context_cost_after_communication") is None,
-                candidate.get("expected_context_cost_after_communication")
-                or float("inf"),
-                str(candidate.get("architecture_id", "")),
-            ),
-        )
-        if not _is_coherent_provisional_candidate(
-            selected_candidate, search_provenance
-        ):
-            return None
-        raw_agents = selected_candidate.get("agents", {})
-        if not raw_agents and selected_candidate.get("agent_tools"):
-            shared = set(selected_candidate.get("shared_tools", ()))
-            raw_agents = {
-                f"agent_{index:02d}": {
-                    "exclusive_tools": list(
-                        selected_candidate.get("exclusive_tools", ())[index - 1]
-                    ),
-                    "shared_tools": sorted(shared),
-                    "tools": list(tools),
-                }
-                for index, tools in enumerate(
-                    selected_candidate["agent_tools"], start=1
-                )
-            }
-        if not isinstance(raw_agents, Mapping) or len(raw_agents) != 2:
-            return None
-        shared = set(selected_candidate.get("shared_tools", ()))
-        control = set(selected_candidate.get("control_tools", ()))
-        return {
-            "architecture_id": "provisional_two_agents",
-            "topology": "peer",
-            "agent_count": 2,
-            "shared_tools": {str(agent_id): sorted(shared) for agent_id in raw_agents},
-            "control_tools": sorted(control),
-            "delegation": {
-                "enabled": bool(control),
-                "topology": "agent_01 <-> agent_02",
-                "edges": {
-                    "agent_01": ["agent_02"],
-                    "agent_02": ["agent_01"],
-                },
-            },
-            "agents": {
-                str(agent_id): {
-                    "exclusive_tools": sorted(set(agent.get("exclusive_tools", ()))),
-                    "shared_tools": sorted(shared),
-                    "tools": sorted(set(agent.get("tools", ())) | shared),
-                }
-                for agent_id, agent in raw_agents.items()
-            },
-            "provisional": True,
-            "directional_only": True,
-            "assumptions": [
-                "membership comes from the dependency-closed partition search",
-                "exposure or definition costs remain incomplete",
-                "agent names, routes, and quality preservation remain hypotheses",
-            ],
-            "provenance": {
-                "source": "partition_search_candidate",
-                "candidate_id": selected_candidate.get("architecture_id"),
-                "search_provenance": dict(search_provenance),
-            },
-        }
-
-    # Structural clusters and sensitivity ranges alone cannot provide a
-    # coherent membership contract. A provisional option must come from the
-    # same concrete partition evidence used for replayable assignments.
-    return None
-
-
-def _is_coherent_provisional_candidate(
-    candidate: Mapping[str, Any], search_provenance: Mapping[str, Any]
-) -> bool:
-    """Require concrete evidence before exposing a provisional split."""
-
-    if not candidate.get("is_cost_complete"):
-        return False
-    if not candidate.get("is_pareto_optimal"):
-        return False
-    if candidate.get("pareto_scope") != "global":
-        return False
-    if not candidate.get("dependency_closed"):
-        return False
-    if not search_provenance.get("search_complete"):
-        return False
-    if search_provenance.get("pareto_scope") != "global":
-        return False
-
-    exclusive = candidate.get("exclusive_tools", ())
-    agent_tools = candidate.get("agent_tools", ())
-    shared = set(candidate.get("shared_tools", ()))
-    if (
-        not isinstance(exclusive, (list, tuple))
-        or not isinstance(agent_tools, (list, tuple))
-        or len(exclusive) != 2
-        or len(agent_tools) != 2
-    ):
-        return False
-    if any(
-        set(exclusive[index]) | shared != set(agent_tools[index]) for index in range(2)
-    ):
-        return False
-    sizes = [len(tools) for tools in exclusive]
-    total = sum(sizes)
-    if total == 0 or min(sizes, default=0) < MIN_PROVISIONAL_AGENT_TOOLS:
-        return False
-    return min(sizes) / total >= MIN_PROVISIONAL_AGENT_SHARE
-
-
 def _semantic_agent_details(
     agent_id: str, tools: Iterable[str], index: int
 ) -> dict[str, Any]:
@@ -2200,19 +2065,31 @@ def _run_analysis(
         cost_complete=measurement["cost_completeness"]["exact_complete"],
         search_complete=partition_result.search_complete,
     )
-    provisional_architecture = materialize_provisional_architecture(
-        recommendation=specialist_classification,
-        candidate_agents=candidates,
-        directional_variants=variants,
-        retained_tools=retained_tools,
-        global_tools=global_tools,
-        search_provenance=partition_result.report["search_provenance"],
-        dependencies=KNOWN_DEPENDENCIES,
-        search_candidates=(
-            partition_result.report.get("candidates", [])
-            if specialist_classification["status"] == "provisional"
-            else None
+    search_candidates = partition_result.report.get("candidates", [])
+    manifest_model = materialize_architecture_manifest(
+        historical_tools=retained_tools,
+        baseline_tools=pruned_flat_baseline["tools_retained"],
+        pareto_candidates=(
+            candidate
+            for candidate in search_candidates
+            if candidate.get("is_pareto_optimal")
         ),
+        dependencies=KNOWN_DEPENDENCIES,
+        search_provenance=partition_result.report["search_provenance"],
+        provisional_recommendation=specialist_classification,
+        provisional_candidates=(
+            search_candidates
+            if specialist_classification["status"] == "provisional"
+            else ()
+        ),
+    )
+    provisional_architecture = next(
+        (
+            architecture
+            for architecture in manifest_model.architectures
+            if architecture.provisional
+        ),
+        None,
     )
     if (
         specialist_classification["status"] == "provisional"
@@ -2232,24 +2109,18 @@ def _run_analysis(
             "evidence_status": "inconclusive",
         }
     provisional_architecture_ids = (
-        [provisional_architecture["architecture_id"]]
+        [provisional_architecture.architecture_id]
         if provisional_architecture is not None
         else []
     )
     if provisional_architecture is not None:
         specialist_classification = {
             **specialist_classification,
-            "provisional_architecture_provenance": provisional_architecture[
-                "provenance"
-            ],
+            "provisional_architecture_provenance": dict(
+                provisional_architecture.provenance
+            ),
         }
-    manifest = dict(partition_result.manifest)
-    manifest["provisional_architecture_ids"] = provisional_architecture_ids
-    if provisional_architecture is not None:
-        manifest["architectures"] = [
-            *manifest["architectures"],
-            provisional_architecture,
-        ]
+    manifest = serialize_architecture_manifest(manifest_model)
     architecture_options = build_architecture_options(
         baseline=pruned_flat_baseline,
         manifest=manifest,
