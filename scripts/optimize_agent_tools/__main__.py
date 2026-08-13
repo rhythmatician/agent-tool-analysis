@@ -79,6 +79,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--global-usage-threshold", type=float, default=0.60)
     parser.add_argument("--min-cluster-size", type=int, default=2)
     parser.add_argument("--min-cluster-sessions", type=int, default=3)
+    parser.add_argument(
+        "--nucleus-threshold",
+        type=float,
+        default=0.40,
+        help="Collapsed canonical session-coverage rate required for the shared nucleus (0 disables coverage-based detection, leaving only coordination tools).",
+    )
     parser.add_argument("--delegation-overhead-tokens", type=int, default=0)
     parser.add_argument(
         "--max-agents",
@@ -102,7 +108,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--freshness-half-life-days", type=float, default=30.0)
     parser.add_argument("--freshness-current-window-days", type=float, default=90.0)
     parser.add_argument("--freshness-trial-window-days", type=float, default=14.0)
-    parser.add_argument("--freshness-current-weight-threshold", type=float, default=0.25)
+    parser.add_argument(
+        "--freshness-current-weight-threshold", type=float, default=0.25
+    )
     return parser.parse_args()
 
 
@@ -127,6 +135,8 @@ def _validate_args(args: argparse.Namespace, github_rates: tuple[float, ...]) ->
         raise SystemExit("--similarity-threshold must be between 0 and 1")
     if not 0 <= args.global_usage_threshold <= 1:
         raise SystemExit("--global-usage-threshold must be between 0 and 1")
+    if not 0 <= getattr(args, "nucleus_threshold", 0.40) <= 1:
+        raise SystemExit("--nucleus-threshold must be between 0 and 1")
     if args.min_cluster_size < 2:
         raise SystemExit("--min-cluster-size must be >= 2")
     if args.min_cluster_sessions < 1:
@@ -144,9 +154,7 @@ def _validate_args(args: argparse.Namespace, github_rates: tuple[float, ...]) ->
     if not github_rates:
         raise SystemExit("--github-exposure-rates must contain at least one rate")
     if args.offline_replay_candidate and not args.offline_replay_input:
-        raise SystemExit(
-            "--offline-replay-candidate requires --offline-replay-input"
-        )
+        raise SystemExit("--offline-replay-candidate requires --offline-replay-input")
     if args.offline_replay_input and not args.offline_replay_candidate:
         raise SystemExit(
             "--offline-replay-input requires --offline-replay-candidate; choose an architecture option explicitly"
@@ -209,6 +217,7 @@ def main() -> int:
         nmf_max_factors=args.nmf_max_factors,
         nmf_seeds=nmf_seeds,
         nmf_iterations=args.nmf_iterations,
+        nucleus_threshold=args.nucleus_threshold,
         freshness_config=_freshness_config(args),
     )
     if args.offline_replay_input:
@@ -218,9 +227,9 @@ def main() -> int:
                 f"Recorded replay bundle was not found: {replay_input_path}"
             )
         if args.offline_replay_candidate:
-            report["specialist_recommendation"]["best_guess_candidate_id"] = (
-                args.offline_replay_candidate
-            )
+            report["specialist_recommendation"][
+                "best_guess_candidate_id"
+            ] = args.offline_replay_candidate
         replay_bundle = json.loads(replay_input_path.read_text(encoding="utf-8"))
         replay_readiness = assess_recorded_replay(report, replay_bundle)
         if replay_readiness.ready:

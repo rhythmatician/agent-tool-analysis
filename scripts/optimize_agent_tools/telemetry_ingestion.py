@@ -41,6 +41,7 @@ TOOL_NAME_REGEX = re.compile(
     r'"tool_name"\s*:\s*"([^"]+)"|'
     r'"(?:tool|function)"\s*:\s*\{\s*"name"\s*:\s*"([^"]+)"'
 )
+COPILOT_TOOL_REGEX = re.compile(r'"(?:toolId|toolName)"\s*:\s*"([^"]+)"')
 CODEX_CALL_TYPES = {"custom_tool_call", "function_call", "mcp_tool_call"}
 _TIMESTAMP_KEYS = ("timestamp", "created_at", "observed_at", "event_time", "time")
 
@@ -215,6 +216,8 @@ def normalize_tool_name(raw_name: str | None) -> str | None:
     clean_name = raw_name.strip(" \"'")
     if clean_name.startswith("runSubagent-"):
         return "agent"
+    if clean_name.startswith(("call_MH", "call-", "toolu_", "chatcmpl")):
+        return "dynamic_tool"
     clean_name = TOOL_REMAP.get(clean_name, clean_name)
     return None if IGNORE_REGEX.search(clean_name) else clean_name
 
@@ -460,6 +463,11 @@ class _VscodeAdapter:
             for match in TOOL_NAME_REGEX.findall(line)
             if (name := normalize_tool_name(match[0] or match[1]))
         ]
+        for raw_name in COPILOT_TOOL_REGEX.findall(line):
+            if (name := normalize_tool_name(raw_name)) and (
+                not calls or calls[-1] != name
+            ):
+                calls.append(name)
         if name := normalize_tool_name(find_raw_tool_call(event)):
             if not calls or calls[-1] != name:
                 calls.append(name)
@@ -567,11 +575,36 @@ def get_vscode_sessions(
 ) -> tuple[list[Session], dict[str, DefinitionRecord]]:
     if not os.path.exists(workspace_storage):
         return [], {}
-    pattern = os.path.join(
-        workspace_storage, "*", "github.copilot-chat", "debug-logs", "*", "*.jsonl"
+    patterns = (
+        os.path.join(
+            workspace_storage,
+            "*",
+            "github.copilot-chat",
+            "debug-logs",
+            "*",
+            "*.jsonl",
+        ),
+        os.path.join(
+            workspace_storage,
+            "*",
+            "GitHub.copilot-chat",
+            "debug-logs",
+            "*",
+            "*.jsonl",
+        ),
+        os.path.join(workspace_storage, "*", "chatSessions", "*.jsonl"),
+        os.path.join(
+            workspace_storage, "*", "GitHub.copilot-chat", "transcripts", "*.jsonl"
+        ),
+        os.path.join(
+            workspace_storage, "*", "github.copilot-chat", "transcripts", "*.jsonl"
+        ),
+    )
+    file_paths = dict.fromkeys(
+        file_path for pattern in patterns for file_path in glob.glob(pattern)
     )
     return _ingest_files(
-        workspace_storage, glob.glob(pattern, recursive=True), _VscodeAdapter()
+        workspace_storage, file_paths, _VscodeAdapter()
     )
 
 

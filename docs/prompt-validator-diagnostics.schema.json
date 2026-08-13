@@ -1,0 +1,119 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/rhythmatician/agent-tool-analysis/docs/prompt-validator-diagnostics.schema.json",
+    "title": "Prompt Validator Diagnostics Export",
+    "description": "Versioned diagnostics exported by the VS Code prompt-validator companion extension.",
+    "type": "object",
+    "required": [
+        "schemaVersion",
+        "files"
+    ],
+    "properties": {
+        "schemaVersion": {
+            "const": 1
+        },
+        "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+        },
+        "files": {
+            "type": "array",
+            "items": {
+                "$ref": "#/$defs/fileDiagnostics"
+            }
+        }
+    },
+    "$defs": {
+        "fileDiagnostics": {
+            "type": "object",
+            "required": [
+                "uri",
+                "diagnostics"
+            ],
+            "properties": {
+                "uri": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "diagnostics": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/diagnostic"
+                    }
+                }
+            },
+            "additionalProperties": true
+        },
+        "diagnostic": {
+            "type": "object",
+            "required": [
+                "message",
+                "range"
+            ],
+            "properties": {
+                "source": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "code": {
+                    "type": [
+                        "string",
+                        "number",
+                        "object",
+                        "null"
+                    ]
+                },
+                "message": {
+                    "type": "string"
+                },
+                "range": {
+                    "$ref": "#/$defs/range"
+                },
+                "severity": {
+                    "type": [
+                        "string",
+                        "number"
+                    ]
+                }
+            },
+            "additionalProperties": true
+        },
+        "range": {
+            "type": "object",
+            "required": [
+                "start",
+                "end"
+            ],
+            "properties": {
+                "start": {
+                    "$ref": "#/$defs/position"
+                },
+                "end": {
+                    "$ref": "#/$defs/position"
+                }
+            },
+            "additionalProperties": false
+        },
+        "position": {
+            "type": "object",
+            "required": [
+                "line",
+                "character"
+            ],
+            "properties": {
+                "line": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "character": {
+                    "type": "integer",
+                    "minimum": 0
+                }
+            },
+            "additionalProperties": false
+        }
+    },
+    "additionalProperties": true
+}
