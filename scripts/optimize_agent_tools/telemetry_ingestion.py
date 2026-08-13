@@ -9,7 +9,7 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any, Iterable, Protocol
 
 from .tool_definition_registry import (
     DEFINITION_KEYS,
@@ -431,68 +431,88 @@ def _prefer_definition(
         definitions[record.normalized_name] = record
 
 
-def get_vscode_sessions(
-    workspace_storage: str,
+@dataclass(frozen=True)
+class _NormalizedEventFacts:
+    """Provider-neutral facts emitted by a telemetry schema adapter."""
+
+    calls: tuple[str, ...] = ()
+    exposed_tools: frozenset[str] = frozenset()
+    exposure_source: str = "not_observed"
+    provider_availability: frozenset[str] = frozenset()
+    provider_tools: dict[str, frozenset[str]] = field(default_factory=dict)
+    dynamic_tool_groups: tuple[DynamicToolGroup, ...] = ()
+    definitions: tuple[DefinitionRecord, ...] = ()
+    observed_at: datetime | None = None
+
+
+class _TelemetryAdapter(Protocol):
+    runtime: str
+
+    def interpret(self, line: str, event: Any) -> _NormalizedEventFacts: ...
+
+
+class _VscodeAdapter:
+    runtime = "vscode"
+
+    def interpret(self, line: str, event: Any) -> _NormalizedEventFacts:
+        calls = [
+            name
+            for match in TOOL_NAME_REGEX.findall(line)
+            if (name := normalize_tool_name(match[0] or match[1]))
+        ]
+        if name := normalize_tool_name(find_raw_tool_call(event)):
+            if not calls or calls[-1] != name:
+                calls.append(name)
+        return _NormalizedEventFacts(
+            calls=tuple(calls),
+            definitions=tuple(extract_tool_definitions(event, self.runtime)),
+            observed_at=event_timestamp(event),
+        )
+
+
+class _CodexAdapter:
+    runtime = "codex"
+
+    def interpret(self, line: str, event: Any) -> _NormalizedEventFacts:
+        groups = tuple(extract_codex_dynamic_tool_groups(event))
+        providers: set[str] = set()
+        provider_tools: dict[str, set[str]] = defaultdict(set)
+        for group in groups:
+            if provider := group.provider_name:
+                providers.add(provider)
+                provider_tools[provider].update(group.normalized_tool_names)
+        return _NormalizedEventFacts(
+            calls=tuple(
+                name
+                for raw_name in extract_codex_calls(event)
+                if (name := normalize_tool_name(raw_name))
+            ),
+            exposed_tools=frozenset(
+                name for group in groups for name in group.normalized_tool_names
+            ),
+            exposure_source="codex:payload.dynamic_tools[].tools[].name"
+            if groups
+            else "not_observed",
+            provider_availability=frozenset(providers),
+            provider_tools={
+                provider: frozenset(tools)
+                for provider, tools in provider_tools.items()
+            },
+            dynamic_tool_groups=groups,
+            definitions=tuple(extract_tool_definitions(event, self.runtime)),
+            observed_at=event_timestamp(event),
+        )
+
+
+def _ingest_files(
+    root: str, file_paths: Iterable[str], adapter: _TelemetryAdapter
 ) -> tuple[list[Session], dict[str, DefinitionRecord]]:
     sessions: list[Session] = []
     definitions: dict[str, DefinitionRecord] = {}
-    if not os.path.exists(workspace_storage):
-        return sessions, definitions
-    pattern = os.path.join(
-        workspace_storage, "*", "github.copilot-chat", "debug-logs", "*", "*.jsonl"
-    )
-    for file_path in glob.glob(pattern, recursive=True):
-        calls: list[str] = []
-        observed_at: datetime | None = None
-        try:
-            with open(file_path, "r", encoding="utf-8", errors="ignore") as stream:
-                for line in stream:
-                    if not line.strip():
-                        continue
-                    for match in TOOL_NAME_REGEX.findall(line):
-                        if name := normalize_tool_name(match[0] or match[1]):
-                            calls.append(name)
-                    try:
-                        event = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    timestamp = event_timestamp(event)
-                    if timestamp and (observed_at is None or timestamp > observed_at):
-                        observed_at = timestamp
-                    if name := normalize_tool_name(find_raw_tool_call(event)):
-                        if not calls or calls[-1] != name:
-                            calls.append(name)
-                    for record in extract_tool_definitions(event, "vscode"):
-                        _prefer_definition(definitions, record)
-        except OSError:
-            continue
-        if calls:
-            sessions.append(
-                Session(
-                    f"vscode:{os.path.relpath(file_path, workspace_storage)}",
-                    "vscode",
-                    calls=calls,
-                    observed_at=observed_at
-                    or datetime.fromtimestamp(
-                        os.path.getmtime(file_path), tz=timezone.utc
-                    ),
-                )
-            )
-    return sessions, definitions
-
-
-def get_codex_sessions(
-    sessions_dir: str,
-) -> tuple[list[Session], dict[str, DefinitionRecord]]:
-    sessions: list[Session] = []
-    definitions: dict[str, DefinitionRecord] = {}
-    if not os.path.exists(sessions_dir):
-        return sessions, definitions
-    for file_path in glob.glob(
-        os.path.join(sessions_dir, "**", "*.jsonl"), recursive=True
-    ):
+    for file_path in file_paths:
         calls: list[str] = []
         exposed: set[str] = set()
+        exposure_source = "not_observed"
         providers: set[str] = set()
         provider_tools: dict[str, set[str]] = defaultdict(set)
         dynamic_tool_groups: list[DynamicToolGroup] = []
@@ -505,42 +525,62 @@ def get_codex_sessions(
                     try:
                         event = json.loads(line)
                     except json.JSONDecodeError:
-                        continue
-                    timestamp = event_timestamp(event)
-                    if timestamp and (observed_at is None or timestamp > observed_at):
-                        observed_at = timestamp
-                    for raw in extract_codex_calls(event):
-                        if name := normalize_tool_name(raw):
-                            calls.append(name)
-                    exposed.update(extract_codex_exposures(event))
-                    dynamic_tool_groups.extend(extract_codex_dynamic_tool_groups(event))
-                    event_providers, event_tools = extract_codex_provider_metadata(
-                        event
-                    )
-                    providers.update(event_providers)
-                    for provider, tools in event_tools.items():
+                        event = None
+                    facts = adapter.interpret(line, event)
+                    calls.extend(facts.calls)
+                    exposed.update(facts.exposed_tools)
+                    if facts.exposed_tools:
+                        exposure_source = facts.exposure_source
+                    providers.update(facts.provider_availability)
+                    dynamic_tool_groups.extend(facts.dynamic_tool_groups)
+                    for provider, tools in facts.provider_tools.items():
                         provider_tools[provider].update(tools)
-                    for record in extract_tool_definitions(event, "codex"):
+                    if facts.observed_at and (
+                        observed_at is None or facts.observed_at > observed_at
+                    ):
+                        observed_at = facts.observed_at
+                    for record in facts.definitions:
                         _prefer_definition(definitions, record)
         except OSError:
             continue
-        if calls or exposed or dynamic_tool_groups:
-            sessions.append(
-                Session(
-                    f"codex:{os.path.relpath(file_path, sessions_dir)}",
-                    "codex",
-                    calls=calls,
-                    exposed_tools=exposed,
-                    provider_availability=providers,
-                    provider_tools=dict(provider_tools),
-                    dynamic_tool_groups=dynamic_tool_groups,
-                    exposure_source="codex:payload.dynamic_tools[].tools[].name"
-                    if exposed
-                    else "not_observed",
-                    observed_at=observed_at
-                    or datetime.fromtimestamp(
-                        os.path.getmtime(file_path), tz=timezone.utc
-                    ),
-                )
+        if not (calls or exposed or dynamic_tool_groups):
+            continue
+        sessions.append(
+            Session(
+                f"{adapter.runtime}:{os.path.relpath(file_path, root)}",
+                adapter.runtime,
+                calls=calls,
+                exposed_tools=exposed,
+                provider_availability=providers,
+                provider_tools=dict(provider_tools),
+                dynamic_tool_groups=dynamic_tool_groups,
+                exposure_source=exposure_source,
+                observed_at=observed_at
+                or datetime.fromtimestamp(os.path.getmtime(file_path), tz=timezone.utc),
             )
+        )
     return sessions, definitions
+
+
+def get_vscode_sessions(
+    workspace_storage: str,
+) -> tuple[list[Session], dict[str, DefinitionRecord]]:
+    if not os.path.exists(workspace_storage):
+        return [], {}
+    pattern = os.path.join(
+        workspace_storage, "*", "github.copilot-chat", "debug-logs", "*", "*.jsonl"
+    )
+    return _ingest_files(
+        workspace_storage, glob.glob(pattern, recursive=True), _VscodeAdapter()
+    )
+
+
+def get_codex_sessions(
+    sessions_dir: str,
+) -> tuple[list[Session], dict[str, DefinitionRecord]]:
+    if not os.path.exists(sessions_dir):
+        return [], {}
+    pattern = os.path.join(sessions_dir, "**", "*.jsonl")
+    return _ingest_files(
+        sessions_dir, glob.glob(pattern, recursive=True), _CodexAdapter()
+    )
