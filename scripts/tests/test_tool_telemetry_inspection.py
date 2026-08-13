@@ -23,6 +23,8 @@ from optimize_agent_tools.exposure_reporting import (
 )
 from optimize_agent_tools.reporting import render_markdown
 from optimize_agent_tools.telemetry_ingestion import (
+    _CodexAdapter,
+    _VscodeAdapter,
     DynamicToolGroup,
     EvidenceSession,
     Session,
@@ -40,6 +42,52 @@ def test_event_timestamp_prefers_embedded_source_time() -> None:
     assert event_timestamp(
         {"timestamp": "2026-08-01T12:00:00Z", "payload": {"timestamp": 0}}
     ).isoformat() == "2026-08-01T12:00:00+00:00"
+
+
+def test_vscode_adapter_normalizes_regex_calls_and_event_evidence() -> None:
+    line = '{"tool_name":"runSubagent-worker","timestamp":"2026-08-01T12:00:00Z"}'
+    event = {
+        "tool_name": "runSubagent-worker",
+        "timestamp": "2026-08-01T12:00:00Z",
+        "tools": [{"name": "search", "description": "Search files"}],
+    }
+
+    facts = _VscodeAdapter().interpret(line, event)
+
+    assert facts.calls == ("agent",)
+    assert facts.observed_at is not None
+    assert facts.observed_at.isoformat() == "2026-08-01T12:00:00+00:00"
+    assert [record.normalized_name for record in facts.definitions] == ["search"]
+
+
+def test_codex_adapter_normalizes_calls_and_dynamic_provider_evidence() -> None:
+    event = {
+        "timestamp": "2026-08-01T12:00:00Z",
+        "payload": {
+            "type": "function_call",
+            "name": "exec",
+            "dynamic_tools": [
+                {
+                    "name": "github",
+                    "tools": [{"name": "github.fetch_issue", "inputSchema": {}}],
+                }
+            ],
+        },
+    }
+
+    facts = _CodexAdapter().interpret("", event)
+
+    assert facts.calls == ("exec",)
+    assert facts.exposed_tools == frozenset({"github.fetch_issue"})
+    assert facts.exposure_source == (
+        "codex:payload.dynamic_tools[].tools[].name"
+    )
+    assert facts.provider_availability == frozenset({"github"})
+    assert facts.provider_tools == {"github": frozenset({"github.fetch_issue"})}
+    assert len(facts.dynamic_tool_groups) == 1
+    assert [record.normalized_name for record in facts.definitions] == [
+        "github.fetch_issue"
+    ]
 from optimize_agent_tools.tool_definition_registry import DefinitionRecord
 
 
