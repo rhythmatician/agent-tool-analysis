@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from types import MappingProxyType
 
 import pytest
 from optimize_agent_tools.analysis_pipeline import (
@@ -47,6 +48,23 @@ def _definition(name: str, tokens: int) -> DefinitionRecord:
         "test",
         "explicit",
         "recovered_definition",
+    )
+
+
+def _minimal_analysis_result() -> AnalysisWorkflowResult:
+    return _run_analysis(
+        [Session("one", "codex", ["a"], {"a"})],
+        {"a": _definition("a", 10)},
+        {},
+        explicit_path=None,
+        definition_roots=[],
+        min_tool_sessions=1,
+        similarity_threshold=0.35,
+        global_usage_threshold=1.0,
+        min_cluster_size=2,
+        min_cluster_sessions=1,
+        delegation_overhead_tokens=0,
+        max_agents=1,
     )
 
 
@@ -100,30 +118,57 @@ def test_normal_analysis_workflow_includes_generic_specialist_recommendation() -
 
 
 def test_analysis_result_serializes_the_stable_report_shape() -> None:
-    sessions = [
-        Session("one", "codex", ["a"], {"a"}),
-    ]
-    definitions = {"a": _definition("a", 10)}
-
-    result = _run_analysis(
-        sessions,
-        definitions,
-        {},
-        explicit_path=None,
-        definition_roots=[],
-        min_tool_sessions=1,
-        similarity_threshold=0.35,
-        global_usage_threshold=1.0,
-        min_cluster_size=2,
-        min_cluster_sessions=1,
-        delegation_overhead_tokens=0,
-        max_agents=1,
-    )
+    result = _minimal_analysis_result()
 
     report = result.serialize()
     assert isinstance(result, AnalysisWorkflowResult)
-    assert report == result.report
+    assert report == result.serialize()
     assert report is not result.report
+
+
+def test_analysis_artifact_owns_immutable_state_and_materialization() -> None:
+    result = _minimal_analysis_result()
+
+    assert isinstance(result.report, MappingProxyType)
+    with pytest.raises(TypeError):
+        result.report["config"] = {}  # type: ignore[index]
+    assert result.to_markdown() == render_markdown(result)
+    assert result.to_json().startswith("{\n")
+
+
+def test_analysis_workflow_finalizes_before_json_and_markdown_materialization() -> None:
+    result = _minimal_analysis_result().finalize(explicit_cost_entries=1)
+
+    assert result["config"]["explicit_cost_entries"] == 1
+    assert result["offline_replay"]["status"] == "not_requested"
+    assert '"explicit_cost_entries": 1' in result.to_json()
+    assert "# Agent Tool Exposure Analysis" in result.to_markdown()
+
+
+def test_analysis_artifact_rejects_cross_section_invariant_mismatch() -> None:
+    with pytest.raises(ValueError, match="architecture option ids"):
+        AnalysisWorkflowResult.materialize(
+            {
+                "config": {},
+                "architecture_manifest": {
+                    "architectures": [{"architecture_id": "baseline"}]
+                },
+                "architecture_options": [{"architecture_id": "baseline"}],
+                "partition_search": {
+                    "search_provenance": {
+                        "search_complete": True,
+                        "search_strategy": "exhaustive",
+                        "pareto_scope": "complete",
+                    }
+                },
+                "specialist_recommendation": {
+                    "architecture_option_ids": ["different"],
+                    "search_complete": True,
+                    "search_strategy": "exhaustive",
+                    "pareto_scope": "complete",
+                },
+            }
+        )
 
 
 def test_normal_analysis_excludes_runtime_controls_from_decomposition() -> None:
