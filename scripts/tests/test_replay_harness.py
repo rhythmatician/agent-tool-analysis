@@ -8,6 +8,8 @@ from optimize_agent_tools.replay_harness import (  # noqa: E402
     build_architecture_manifest,
     compare_to_benchmark,
     historical_tool_capability_coverage,
+    materialize_architecture_manifest,
+    materialize_provisional_architecture,
     replay_recorded_observations,
     run_replay,
     select_architecture_manifest,
@@ -77,6 +79,96 @@ def test_manifest_supports_arbitrary_architectures_and_owns_its_baseline() -> No
         "review_agent": frozenset({"review_tool"}),
         "file_agent": frozenset({"file_tool"}),
     }
+
+
+def test_manifest_module_materializes_baseline_pareto_and_provisional_values() -> None:
+    candidate = {
+        "architecture_id": "partition_k02_0001",
+        "topology": "peer",
+        "agent_count": 2,
+        "agent_tools": [["a", "aa", "shared"], ["b", "bb", "shared"]],
+        "exclusive_tools": [["a", "aa"], ["b", "bb"]],
+        "shared_tools": ["shared"],
+        "control_tools": [],
+        "placement_strategy": "exclusive",
+        "dependency_closed": True,
+        "is_cost_complete": True,
+        "is_pareto_optimal": True,
+        "pareto_scope": "global",
+        "expected_context_cost_after_communication": 10.0,
+    }
+    recommendation = {
+        "status": "provisional",
+        "direction": "2-agent architecture",
+    }
+
+    manifest = materialize_architecture_manifest(
+        historical_tools={"a", "aa", "b", "bb", "shared"},
+        baseline_tools={"a", "aa", "b", "bb", "shared"},
+        pareto_candidates=[candidate],
+        dependencies={},
+        search_provenance={"search_complete": True, "pareto_scope": "global"},
+        provisional_recommendation=recommendation,
+        provisional_candidates=[candidate],
+    )
+    wire = serialize_architecture_manifest(manifest)
+
+    assert manifest.architecture_ids == (
+        BASELINE_ARCHITECTURE_ID,
+        "partition_k02_0001",
+        "provisional_two_agents",
+    )
+    assert manifest.provisional_architecture_ids == ("provisional_two_agents",)
+    assert wire["architectures"][1]["agents"]["agent_01"]["tools"] == [
+        "a",
+        "aa",
+        "shared",
+    ]
+    assert wire["architectures"][1]["delegation"]["enabled"] is False
+    assert wire["architectures"][2]["provenance"]["candidate_id"] == (
+        "partition_k02_0001"
+    )
+
+
+def test_materialized_coordinator_serializes_sibling_children() -> None:
+    manifest = materialize_architecture_manifest(
+        historical_tools={"a", "b", "control"},
+        baseline_tools={"a", "b", "control"},
+        pareto_candidates=[
+            {
+                "architecture_id": "coordinator",
+                "topology": "coordinator_children",
+                "agent_count": 3,
+                "agent_tools": [["a"], ["b"]],
+                "shared_tools": [],
+                "control_tools": ["control"],
+                "placement_strategy": "exclusive",
+            }
+        ],
+        dependencies={},
+        search_provenance={},
+    )
+
+    candidate = serialize_architecture_manifest(manifest)["architectures"][1]
+    assert candidate["delegation"]["enabled"] is True
+    assert candidate["delegation"]["topology"] == "parent -> agent_01, agent_02"
+
+
+def test_provisional_materialization_rejects_incoherent_candidate() -> None:
+    assert materialize_provisional_architecture(
+        recommendation={
+            "status": "provisional",
+            "direction": "2-agent architecture",
+        },
+        search_provenance={"search_complete": False},
+        search_candidates=[
+            {
+                "architecture_id": "candidate",
+                "agent_count": 2,
+                "is_cost_complete": False,
+            }
+        ],
+    ) is None
 
 
 def test_replay_aggregates_billing_and_tool_selection_measurements() -> None:

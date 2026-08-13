@@ -10,11 +10,11 @@ from optimize_agent_tools.analysis_pipeline import (
     analyze,
     build_architecture_options,
     classify_specialist_recommendation,
-    materialize_provisional_architecture,
 )
 from optimize_agent_tools.partition_search import search_partitions
 from optimize_agent_tools.replay_harness import (
     build_architecture_manifest,
+    materialize_provisional_architecture,
 )
 from optimize_agent_tools.reporting import render_markdown
 from optimize_agent_tools.telemetry_ingestion import Session
@@ -374,24 +374,6 @@ def test_directional_hypothesis_without_partition_candidate_does_not_materialize
     }
     manifest_entry = materialize_provisional_architecture(
         recommendation=recommendation,
-        candidate_agents=[
-            {
-                "candidate_id": "cluster_01",
-                "tools": ["a", "dep_a"],
-                "internal_affinity": 0.8,
-            },
-            {
-                "candidate_id": "cluster_02",
-                "tools": ["b", "c"],
-                "internal_affinity": 0.7,
-            },
-        ],
-        directional_variants=[
-            {"variant_id": "cluster_01", "sensitivity": {"max_mid_reduction": 0.4}},
-            {"variant_id": "cluster_02", "sensitivity": {"max_mid_reduction": 0.3}},
-        ],
-        retained_tools={"shared", "a", "b", "c", "dep_a"},
-        global_tools={"shared"},
         search_provenance={"search_complete": False},
         dependencies={"a": {"dep_a"}},
     )
@@ -425,14 +407,6 @@ def test_incoherent_partition_candidate_does_not_materialize() -> None:
     assert (
         materialize_provisional_architecture(
             recommendation=recommendation,
-            candidate_agents=[],
-            directional_variants=[],
-            retained_tools={
-                "github.fetch_issue",
-                "github.fetch_pr",
-                "github.update_pull_request",
-            },
-            global_tools=set(),
             search_provenance={
                 "search_complete": False,
                 "search_strategy": "bounded",

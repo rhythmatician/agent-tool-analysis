@@ -10,8 +10,7 @@ from optimize_agent_tools.exposure_models import (
     baseline_exposure_states,
 )
 from optimize_agent_tools.replay_harness import (
-    BASELINE_ARCHITECTURE_ID,
-    build_architecture_manifest,
+    materialize_architecture_manifest,
     serialize_architecture_manifest,
 )
 from optimize_agent_tools.telemetry_ingestion import (
@@ -703,107 +702,21 @@ def search_partitions(
     marked_frontier = tuple(
         candidate for candidate in marked_all if candidate.is_pareto_optimal
     )
-    architectures: list[dict[str, Any]] = [
-        {
-            "architecture_id": BASELINE_ARCHITECTURE_ID,
-            "topology": "flat",
-            "agent_count": 1,
-            "parent_tools": sorted(baseline_surface),
-            "agents": {},
-            "control_tools": [],
-            "dependencies": {
-                tool: sorted(values)
-                for tool, values in sorted(dependencies.items())
-                if tool in baseline_surface and values <= baseline_surface
-            },
-        }
-    ]
-    architectures.extend(
-        {
-            "architecture_id": candidate.architecture_id,
-            "topology": candidate.topology,
-            "agent_count": candidate.agent_count,
-            "placement_strategy": candidate.placement_strategy,
-            "shared_tools": list(candidate.shared_tools),
-            "control_tools": list(candidate.control_tools),
-            "dependencies": {
-                tool: sorted(values)
-                for tool, values in sorted(dependencies.items())
-                if tool
-                in frozenset(
-                    tool_name
-                    for agent_tools in candidate.agent_tools
-                    for tool_name in agent_tools
-                )
-                and values
-                <= frozenset(
-                    tool_name
-                    for agent_tools in candidate.agent_tools
-                    for tool_name in agent_tools
-                )
-            },
-            "delegation": {
-                "enabled": len(candidate.agent_tools) > 1
-                and bool(candidate.control_tools),
-                "topology": (
-                    "parent -> "
-                    + ", ".join(
-                        f"agent_{index:02d}"
-                        for index in range(1, len(candidate.agent_tools) + 1)
-                    )
-                    if candidate.topology == "coordinator_children"
-                    else " <-> ".join(
-                        f"agent_{index:02d}"
-                        for index in range(1, len(candidate.agent_tools) + 1)
-                    )
-                ),
-                "edges": {
-                    **(
-                        {
-                            "parent": [
-                                f"agent_{index:02d}"
-                                for index in range(1, len(candidate.agent_tools) + 1)
-                            ]
-                        }
-                        if candidate.topology == "coordinator_children"
-                        else {
-                            f"agent_{index:02d}": [
-                                f"agent_{target:02d}"
-                                for target in range(1, len(candidate.agent_tools) + 1)
-                                if target != index
-                            ]
-                            for index in range(1, len(candidate.agent_tools) + 1)
-                        }
-                    )
-                },
-            },
-            "parent_tools": list(candidate.control_tools)
-            if candidate.topology == "coordinator_children"
-            else [],
-            "agents": {
-                f"agent_{index:02d}": {
-                    "exclusive_tools": list(candidate.exclusive_tools[index - 1]),
-                    "shared_tools": list(candidate.shared_tools),
-                    "tools": list(tools),
-                }
-                for index, tools in enumerate(candidate.agent_tools, start=1)
-            },
-        }
-        for candidate in marked_frontier
-    )
     search_provenance = {
         "search_complete": complete,
         "search_strategy": "exhaustive" if exhaustive else "bounded",
         "pareto_scope": pareto_scope,
     }
-    manifest_raw = {
-        "baseline_architecture_id": BASELINE_ARCHITECTURE_ID,
-        "historical_tool_capability_tools": sorted(required_retained),
-        "search_provenance": search_provenance,
-        "architectures": architectures,
-    }
     manifest = serialize_architecture_manifest(
-        build_architecture_manifest(manifest_raw)
+        materialize_architecture_manifest(
+            historical_tools=required_retained,
+            baseline_tools=baseline_surface,
+            pareto_candidates=(
+                _candidate_dict(candidate) for candidate in marked_frontier
+            ),
+            dependencies=dependencies,
+            search_provenance=search_provenance,
+        )
     )
     report = {
         "search": {

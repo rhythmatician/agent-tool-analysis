@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Mapping
 
 BASELINE_ARCHITECTURE_ID = "pruned_flat_baseline"
+MIN_PROVISIONAL_AGENT_TOOLS = 2
+MIN_PROVISIONAL_AGENT_SHARE = 0.25
 
 
 def _string_set(values: Iterable[str], field_name: str) -> frozenset[str]:
@@ -209,6 +211,195 @@ class ArchitectureManifest:
         )
 
 
+def _candidate_architecture(
+    candidate: Mapping[str, Any],
+    dependencies: Mapping[str, Iterable[str]],
+) -> BenchmarkArchitecture:
+    """Materialize and validate one partition-search candidate."""
+    raw_agent_tools = candidate.get("agent_tools", ())
+    if not isinstance(raw_agent_tools, (list, tuple)) or not raw_agent_tools:
+        raise ValueError("Partition candidates must contain concrete agent tools.")
+    agent_tools = {
+        f"agent_{index:02d}": _string_set(tools, f"agent_tools.{index}")
+        for index, tools in enumerate(raw_agent_tools, start=1)
+    }
+    shared = _string_set(candidate.get("shared_tools", ()), "shared_tools")
+    topology = str(candidate.get("topology", "peer"))
+    agent_ids = tuple(agent_tools)
+    control = _string_set(candidate.get("control_tools", ()), "control_tools")
+    available = frozenset(tool for tools in agent_tools.values() for tool in tools)
+    materialized_dependencies = {
+        str(tool): _string_set(values, f"dependencies.{tool}")
+        for tool, values in dependencies.items()
+        if tool in available
+    }
+    if topology == "coordinator_children":
+        parent_tools = control
+        edges = {"parent": frozenset(agent_ids)}
+    else:
+        parent_tools = frozenset()
+        edges = {
+            agent_id: frozenset(target for target in agent_ids if target != agent_id)
+            for agent_id in agent_ids
+        }
+    return BenchmarkArchitecture(
+        architecture_id=str(candidate["architecture_id"]),
+        parent_tools=parent_tools,
+        agent_tools=agent_tools,
+        topology=topology,
+        placement_strategy=str(candidate.get("placement_strategy", "exclusive")),
+        shared_tools={agent_id: shared for agent_id in agent_ids},
+        control_tools=control,
+        delegation_edges=edges,
+        declared_agent_count=int(candidate.get("agent_count", len(agent_ids))),
+        dependencies=materialized_dependencies,
+    )
+
+
+def _is_coherent_provisional_candidate(
+    candidate: Mapping[str, Any], search_provenance: Mapping[str, Any]
+) -> bool:
+    if not all(
+        (
+            candidate.get("is_cost_complete"),
+            candidate.get("is_pareto_optimal"),
+            candidate.get("dependency_closed"),
+            candidate.get("pareto_scope") == "global",
+            search_provenance.get("search_complete"),
+            search_provenance.get("pareto_scope") == "global",
+        )
+    ):
+        return False
+    exclusive = candidate.get("exclusive_tools", ())
+    agent_tools = candidate.get("agent_tools", ())
+    shared = set(candidate.get("shared_tools", ()))
+    if not all(
+        isinstance(values, (list, tuple)) and len(values) == 2
+        for values in (exclusive, agent_tools)
+    ):
+        return False
+    if any(
+        set(exclusive[index]) | shared != set(agent_tools[index])
+        for index in range(2)
+    ):
+        return False
+    sizes = [len(tools) for tools in exclusive]
+    total = sum(sizes)
+    return (
+        total > 0
+        and min(sizes) >= MIN_PROVISIONAL_AGENT_TOOLS
+        and min(sizes) / total >= MIN_PROVISIONAL_AGENT_SHARE
+    )
+
+
+def materialize_provisional_architecture(
+    *,
+    recommendation: Mapping[str, Any],
+    search_provenance: Mapping[str, Any],
+    search_candidates: Iterable[Mapping[str, Any]] = (),
+    dependencies: Mapping[str, Iterable[str]] | None = None,
+) -> BenchmarkArchitecture | None:
+    """Materialize a provisional architecture from coherent search evidence."""
+    if recommendation.get("status") != "provisional" or recommendation.get(
+        "direction"
+    ) != "2-agent architecture":
+        return None
+    candidates = [
+        candidate
+        for candidate in search_candidates
+        if int(candidate.get("agent_count", 0)) == 2
+        and _is_coherent_provisional_candidate(candidate, search_provenance)
+    ]
+    if not candidates:
+        return None
+    selected = min(
+        candidates,
+        key=lambda candidate: (
+            candidate.get("expected_context_cost_after_communication") is None,
+            candidate.get("expected_context_cost_after_communication") or float("inf"),
+            str(candidate.get("architecture_id", "")),
+        ),
+    )
+    source = _candidate_architecture(selected, dependencies or {})
+    return replace(
+        source,
+        architecture_id="provisional_two_agents",
+        provisional=True,
+        directional_only=True,
+        assumptions=(
+            "membership comes from the dependency-closed partition search",
+            "exposure or definition costs remain incomplete",
+            "agent names, routes, and quality preservation remain hypotheses",
+        ),
+        provenance={
+            "source": "partition_search_candidate",
+            "candidate_id": selected.get("architecture_id"),
+            "search_provenance": dict(search_provenance),
+        },
+    )
+
+
+def materialize_architecture_manifest(
+    *,
+    historical_tools: Iterable[str],
+    baseline_tools: Iterable[str],
+    pareto_candidates: Iterable[Mapping[str, Any]],
+    dependencies: Mapping[str, Iterable[str]] | None,
+    search_provenance: Mapping[str, Any],
+    provisional_recommendation: Mapping[str, Any] | None = None,
+    provisional_candidates: Iterable[Mapping[str, Any]] = (),
+) -> ArchitectureManifest:
+    """Own baseline, Pareto, and provisional manifest materialization."""
+    dependency_map = dependencies or {}
+    baseline_surface = _string_set(baseline_tools, "baseline_tools")
+    baseline_dependencies = {
+        str(tool): _string_set(values, f"dependencies.{tool}")
+        for tool, values in dependency_map.items()
+        if tool in baseline_surface
+    }
+    architectures = [
+        BenchmarkArchitecture(
+            architecture_id=BASELINE_ARCHITECTURE_ID,
+            parent_tools=baseline_surface,
+            topology="flat",
+            declared_agent_count=1,
+            dependencies=baseline_dependencies,
+        )
+    ]
+    architectures.extend(
+        _candidate_architecture(candidate, dependency_map)
+        for candidate in pareto_candidates
+    )
+    provisional = materialize_provisional_architecture(
+        recommendation=provisional_recommendation or {},
+        search_provenance=search_provenance,
+        search_candidates=provisional_candidates,
+        dependencies=dependency_map,
+    )
+    if provisional is not None:
+        architectures.append(provisional)
+    manifest = ArchitectureManifest(
+        baseline_architecture_id=BASELINE_ARCHITECTURE_ID,
+        historical_tool_capability_tools=_string_set(
+            historical_tools, "historical_tools"
+        ),
+        architectures=tuple(architectures),
+        search_provenance=dict(search_provenance),
+        provisional_architecture_ids=(
+            (provisional.architecture_id,) if provisional is not None else ()
+        ),
+    )
+    missing = (
+        manifest.historical_tool_capability_tools - manifest.baseline.available_tools
+    )
+    if missing:
+        raise ValueError(
+            "The pruned_flat_baseline does not retain historical capabilities: "
+            + ", ".join(sorted(missing))
+        )
+    return manifest
+
+
 def build_architecture_manifest(raw: Mapping[str, Any]) -> ArchitectureManifest:
     """Parse an architecture manifest without inferring or optimizing routes."""
     raw_architectures = raw.get("architectures")
@@ -366,11 +557,13 @@ def serialize_architecture_manifest(manifest: ArchitectureManifest) -> dict[str,
                 else set()
             )
             entry["delegation"] = {
-                "enabled": bool(architecture.delegation_edges),
+                "enabled": bool(
+                    architecture.control_tools and architecture.delegation_edges
+                ),
                 "topology": (
                     " <-> ".join(sorted(architecture.agent_tools))
                     if topology == "peer"
-                    else " -> ".join(["parent", *sorted(architecture.agent_tools)])
+                    else "parent -> " + ", ".join(sorted(architecture.agent_tools))
                 ),
                 "edges": {
                     agent_id: sorted(targets)
