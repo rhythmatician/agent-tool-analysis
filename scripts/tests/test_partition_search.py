@@ -145,6 +145,14 @@ def test_analysis_workflow_finalizes_before_json_and_markdown_materialization() 
     assert "# Agent Tool Exposure Analysis" in result.to_markdown()
 
 
+def test_analysis_workflow_rejects_unknown_replay_candidate() -> None:
+    with pytest.raises(ValueError, match="replay candidate must reference"):
+        _minimal_analysis_result().finalize(
+            explicit_cost_entries=1,
+            replay_candidate="missing-candidate",
+        )
+
+
 def test_analysis_artifact_rejects_cross_section_invariant_mismatch() -> None:
     with pytest.raises(ValueError, match="architecture option ids"):
         AnalysisWorkflowResult.materialize(
